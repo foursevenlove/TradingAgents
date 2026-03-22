@@ -1,0 +1,15 @@
+# Clash规则 - 添加到你的Clash配置文件中
+# 让akshare访问的国内网站直连，不走代理
+
+rules:
+  # 东方财富网（akshare数据源）
+  - DOMAIN-SUFFIX,eastmoney.com,DIRECT
+  - DOMAIN-SUFFIX,em.com,DIRECT
+
+  # 其他A股数据源
+  - DOMAIN-SUFFIX,sina.com.cn,DIRECT
+  - DOMAIN-SUFFIX,163.com,DIRECT
+  - DOMAIN-SUFFIX,qq.com,DIRECT
+
+  # 默认规则
+  - MATCH,Proxy

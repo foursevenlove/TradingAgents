@@ -24,18 +24,23 @@ def get_fundamentals(
     try:
         stock_code, market = _convert_ticker_format(ticker)
 
-        # Get company information
-        # ak.stock_individual_info_em returns basic company info
-        df = ak.stock_individual_info_em(symbol=stock_code)
+        # Get company information from cninfo (巨潮资讯)
+        # More stable than eastmoney API
+        df = ak.stock_profile_cninfo(symbol=stock_code)
 
         if df.empty:
             return f"No fundamental data found for {ticker}"
 
+        # Transpose to make it more readable (columns become rows)
+        df_transposed = df.T.reset_index()
+        df_transposed.columns = ['Item', 'Value']
+
         # Format as CSV
         header = f"# Fundamental data for {ticker}\n"
+        header += f"# Data source: cninfo (巨潮资讯)\n"
         header += f"# Retrieved on: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n"
 
-        return _format_to_csv(df, header)
+        return _format_to_csv(df_transposed, header)
 
     except Exception as e:
         raise AkshareDataError(f"Failed to get fundamentals for {ticker}: {str(e)}")
@@ -59,14 +64,17 @@ def get_balance_sheet(
     try:
         stock_code, market = _convert_ticker_format(ticker)
 
-        # Get balance sheet data
-        # ak.stock_balance_sheet_by_report_em returns balance sheet
-        df = ak.stock_balance_sheet_by_report_em(symbol=stock_code)
+        # Convert to Sina format (e.g., sh600667)
+        sina_symbol = f"{market.lower()}{stock_code}"
+
+        # Get balance sheet data from Sina
+        df = ak.stock_financial_report_sina(stock=sina_symbol, symbol='资产负债表')
 
         if df.empty:
             return f"No balance sheet data found for {ticker}"
 
         header = f"# Balance sheet for {ticker} ({freq})\n"
+        header += f"# Data source: Sina Finance\n"
         header += f"# Retrieved on: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n"
 
         return _format_to_csv(df, header)
@@ -93,13 +101,17 @@ def get_cashflow(
     try:
         stock_code, market = _convert_ticker_format(ticker)
 
-        # Get cash flow data
-        df = ak.stock_cash_flow_sheet_by_report_em(symbol=stock_code)
+        # Convert to Sina format (e.g., sh600667)
+        sina_symbol = f"{market.lower()}{stock_code}"
+
+        # Get cash flow data from Sina
+        df = ak.stock_financial_report_sina(stock=sina_symbol, symbol='现金流量表')
 
         if df.empty:
             return f"No cash flow data found for {ticker}"
 
         header = f"# Cash flow statement for {ticker} ({freq})\n"
+        header += f"# Data source: Sina Finance\n"
         header += f"# Retrieved on: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n"
 
         return _format_to_csv(df, header)
@@ -126,13 +138,17 @@ def get_income_statement(
     try:
         stock_code, market = _convert_ticker_format(ticker)
 
-        # Get income statement data
-        df = ak.stock_profit_sheet_by_report_em(symbol=stock_code)
+        # Convert to Sina format (e.g., sh600667)
+        sina_symbol = f"{market.lower()}{stock_code}"
+
+        # Get income statement data from Sina
+        df = ak.stock_financial_report_sina(stock=sina_symbol, symbol='利润表')
 
         if df.empty:
             return f"No income statement data found for {ticker}"
 
         header = f"# Income statement for {ticker} ({freq})\n"
+        header += f"# Data source: Sina Finance\n"
         header += f"# Retrieved on: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n"
 
         return _format_to_csv(df, header)

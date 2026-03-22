@@ -50,14 +50,24 @@ def get_news(
         raise AkshareDataError(f"Failed to get news for {ticker}: {str(e)}")
 
 
-def get_global_news(curr_date: Optional[str] = None) -> str:
+def get_global_news(
+    curr_date: Optional[str] = None,
+    look_back_days: Optional[int] = None,
+    limit: Optional[int] = None,
+) -> str:
     """Get global financial news relevant to A-share market.
 
     Args:
-        curr_date: Current date (optional)
+        curr_date: Current date (optional, not used by akshare)
+        look_back_days: Number of days to look back (optional, not used by akshare)
+        limit: Maximum number of news items to return (default: 30)
 
     Returns:
         CSV string containing global news data
+
+    Note:
+        akshare's news_economic_baidu doesn't support date filtering,
+        so curr_date and look_back_days are accepted but ignored for compatibility.
     """
     try:
         # Get financial news
@@ -68,7 +78,8 @@ def get_global_news(curr_date: Optional[str] = None) -> str:
             return "No global news available"
 
         # Limit to recent news
-        df = df.head(30)
+        max_items = limit if limit is not None else 30
+        df = df.head(max_items)
 
         header = f"# Global financial news\n"
         header += f"# Retrieved on: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n"
