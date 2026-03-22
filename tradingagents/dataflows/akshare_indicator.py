@@ -4,9 +4,9 @@ from datetime import datetime, timedelta
 from typing import Annotated
 import akshare as ak
 import pandas as pd
+from stockstats import wrap
 
 from .akshare_common import _convert_ticker_format, AkshareDataError
-from .stockstats_utils import StockstatsUtils
 
 
 def get_indicator(
@@ -40,42 +40,50 @@ def get_indicator(
         # Convert ticker format
         stock_code, market = _convert_ticker_format(symbol)
 
-        # Fetch historical data from akshare
-        df = ak.stock_zh_a_hist(
-            symbol=stock_code,
-            period="daily",
+        # Fetch historical data from akshare using Tencent data source (more stable)
+        tx_symbol = f"{market}{stock_code}"
+        df = ak.stock_zh_a_hist_tx(
+            symbol=tx_symbol,
             start_date=start_date.replace("-", ""),
             end_date=curr_date.replace("-", ""),
-            adjust="qfq",
         )
 
         if df.empty:
             return f"No data found for symbol '{symbol}'"
 
         # Rename columns to match stockstats format
-        # stockstats expects: date, open, high, low, close, volume
+        # stockstats expects: Date, Open, High, Low, Close, Volume (capitalized)
+        # Tencent data source uses lowercase English column names
         column_mapping = {
-            "日期": "date",
-            "开盘": "open",
-            "收盘": "close",
-            "最高": "high",
-            "最低": "low",
-            "成交量": "volume",
+            "date": "Date",
+            "open": "Open",
+            "close": "Close",
+            "high": "High",
+            "low": "Low",
+            "amount": "Volume",  # Tencent uses 'amount' for volume
         }
 
         df_renamed = df.rename(columns=column_mapping)
 
-        # Use StockstatsUtils to calculate indicator
-        stats_util = StockstatsUtils()
-        result_df = stats_util.get_indicator(df_renamed, indicator)
+        # Use stockstats to calculate indicator
+        # Wrap the dataframe with stockstats
+        stock_df = wrap(df_renamed)
+
+        # Calculate the indicator (this triggers stockstats calculation)
+        stock_df[indicator]
+
+        # Select relevant columns for output
+        output_cols = ["Date", "Open", "High", "Low", "Close", "Volume", indicator]
+        available_cols = [col for col in output_cols if col in stock_df.columns]
+        result_df = stock_df[available_cols].copy()
 
         if result_df.empty:
             return f"Failed to calculate indicator '{indicator}' for {symbol}"
 
         # Filter to requested date range
-        result_df["date"] = pd.to_datetime(result_df["date"])
+        result_df["Date"] = pd.to_datetime(result_df["Date"])
         filter_start = curr_dt - timedelta(days=look_back_days)
-        result_df = result_df[result_df["date"] >= filter_start]
+        result_df = result_df[result_df["Date"] >= filter_start]
 
         # Add header
         header = f"# Technical indicator '{indicator}' for {symbol}\n"
