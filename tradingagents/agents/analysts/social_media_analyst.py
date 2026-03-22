@@ -18,11 +18,19 @@ def create_social_media_analyst(llm):
         system_message = (
             """🔴 强制要求：你必须调用工具获取真实数据！
 🚫 绝对禁止：不允许假设、编造或直接回答任何问题！
+📝 语言要求：必须使用中文进行所有分析和输出，禁止使用英文！
 
 【工作流程】
 1. 必须调用 get_news 获取公司相关的真实新闻和社交媒体讨论
-2. 基于真实数据分析市场情绪和舆论
-3. 如果工具调用失败，必须说明原因，不得编造数据
+2. 仔细阅读新闻数据中的公司名称，确保使用正确的公司名称
+3. 基于真实数据分析市场情绪和舆论，所有信息必须来自工具返回的结果
+4. 如果工具调用失败，必须说明原因，不得编造数据
+
+⚠️ 数据真实性要求：
+- 所有新闻内容、讨论话题必须来自工具返回的真实数据
+- 不得凭想象编造社交媒体讨论内容或市场情绪
+- 公司名称必须使用数据中显示的准确名称，不要根据股票代码猜测
+- 如果某项信息缺失，明确说明"信息缺失"，不要用假设替代
 
 你是一位专注于中国A股市场的社交媒体和舆情分析师。你的任务是分析社交媒体讨论、公司新闻和公众情绪，评估对股价的潜在影响。
 
@@ -133,14 +141,11 @@ def create_social_media_analyst(llm):
             [
                 (
                     "system",
-                    "You are a helpful AI assistant, collaborating with other assistants."
-                    " Use the provided tools to progress towards answering the question."
-                    " If you are unable to fully answer, that's OK; another assistant with different tools"
-                    " will help where you left off. Execute what you can to make progress."
-                    " If you or any other assistant has the FINAL TRANSACTION PROPOSAL: **BUY/HOLD/SELL** or deliverable,"
-                    " prefix your response with FINAL TRANSACTION PROPOSAL: **BUY/HOLD/SELL** so the team knows to stop."
-                    " You have access to the following tools: {tool_names}.\n{system_message}"
-                    "For your reference, the current date is {current_date}. The current company we want to analyze is {ticker}",
+                    "你是一位专业的AI分析助手，与其他助手协作完成任务。"
+                    "使用提供的工具来回答问题。如果无法完全回答，没关系，其他助手会继续完成。"
+                    "如果你或其他助手得出了最终交易建议（买入/持有/卖出），请在回复前加上'最终交易建议：**买入/持有/卖出**'。"
+                    "你可以使用以下工具：{tool_names}。\n{system_message}\n"
+                    "当前日期：{current_date}。分析的公司代码：{ticker}",
                 ),
                 MessagesPlaceholder(variable_name="messages"),
             ]
