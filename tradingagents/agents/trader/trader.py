@@ -20,7 +20,7 @@ def create_trader(llm, memory):
             for i, rec in enumerate(past_memories, 1):
                 past_memory_str += rec["recommendation"] + "\n\n"
         else:
-            past_memory_str = "No past memories found."
+            past_memory_str = "未找到历史记忆。"
 
         context = {
             "role": "user",
