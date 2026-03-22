@@ -10,16 +10,22 @@ from .akshare_common import _convert_ticker_format, _format_to_csv, AkshareDataE
 
 def get_news(
     ticker: Annotated[str, "A-share ticker symbol (e.g., 000001.SZ, 600000.SH)"],
-    curr_date: Optional[str] = None,
+    start_date: Optional[str] = None,
+    end_date: Optional[str] = None,
 ) -> str:
     """Get news for specific A-share stock.
 
     Args:
         ticker: A-share ticker symbol
-        curr_date: Current date (optional)
+        start_date: Start date (optional, not used by akshare)
+        end_date: End date (optional, not used by akshare)
 
     Returns:
         CSV string containing news data
+
+    Note:
+        akshare's stock_news_em doesn't support date filtering,
+        so start_date and end_date are accepted but ignored for compatibility.
     """
     try:
         stock_code, market = _convert_ticker_format(ticker)
