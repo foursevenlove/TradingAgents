@@ -40,30 +40,67 @@ def get_indicator(
         # Convert ticker format
         stock_code, market = _convert_ticker_format(symbol)
 
-        # Fetch historical data from akshare using Tencent data source (more stable)
+        # Try multiple stable data sources (avoid eastmoney APIs)
+        stock_code, market = _convert_ticker_format(symbol)
         tx_symbol = f"{market}{stock_code}"
-        df = ak.stock_zh_a_hist_tx(
-            symbol=tx_symbol,
-            start_date=start_date.replace("-", ""),
-            end_date=curr_date.replace("-", ""),
-        )
+        df = None
 
-        if df.empty:
+        # Try 1: Tencent API
+        try:
+            df = ak.stock_zh_a_hist_tx(
+                symbol=tx_symbol,
+                start_date=start_date.replace("-", ""),
+                end_date=curr_date.replace("-", ""),
+            )
+        except Exception:
+            pass
+
+        # Try 2: Sina API
+        if df is None or df.empty:
+            try:
+                df = ak.fund_etf_hist_sina(symbol=stock_code)
+                if df is not None and not df.empty:
+                    df = df[(df['date'] >= start_date) & (df['date'] <= curr_date)]
+            except Exception:
+                pass
+
+        # Try 3: 163 API
+        if df is None or df.empty:
+            try:
+                df = ak.stock_zh_a_hist_163(
+                    symbol=stock_code,
+                    start_date=start_date.replace("-", ""),
+                    end_date=curr_date.replace("-", ""),
+                )
+            except Exception:
+                pass
+
+        if df is None or df.empty:
             return f"No data found for symbol '{symbol}'"
 
         # Rename columns to match stockstats format
-        # stockstats expects: Date, Open, High, Low, Close, Volume (capitalized)
-        # Tencent data source uses lowercase English column names
         column_mapping = {
             "date": "Date",
+            "日期": "Date",
             "open": "Open",
+            "开盘": "Open",
             "close": "Close",
+            "收盘": "Close",
             "high": "High",
+            "最高": "High",
             "low": "Low",
-            "amount": "Volume",  # Tencent uses 'amount' for volume
+            "最低": "Low",
+            "amount": "Volume",
+            "volume": "Volume",
+            "成交量": "Volume",
         }
 
         df_renamed = df.rename(columns=column_mapping)
+
+        # Ensure required columns exist
+        required = ["Date", "Open", "High", "Low", "Close"]
+        if not all(col in df_renamed.columns for col in required):
+            return f"Missing required price data for symbol '{symbol}'"
 
         # Use stockstats to calculate indicator
         # Wrap the dataframe with stockstats
