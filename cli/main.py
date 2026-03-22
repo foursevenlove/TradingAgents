@@ -43,10 +43,10 @@ app = typer.Typer(
 class MessageBuffer:
     # Fixed teams that always run (not user-selectable)
     FIXED_AGENTS = {
-        "Research Team": ["Bull Researcher", "Bear Researcher", "Research Manager"],
-        "Trading Team": ["Trader"],
-        "Risk Management": ["Aggressive Analyst", "Neutral Analyst", "Conservative Analyst"],
-        "Portfolio Management": ["Portfolio Manager"],
+        "研究团队": ["Bull Researcher", "Bear Researcher", "Research Manager"],
+        "交易团队": ["Trader"],
+        "风险管理": ["Aggressive Analyst", "Neutral Analyst", "Conservative Analyst"],
+        "投资组合管理": ["Portfolio Manager"],
     }
 
     # Analyst name mapping
@@ -59,7 +59,7 @@ class MessageBuffer:
 
     # Report section mapping: section -> (analyst_key for filtering, finalizing_agent)
     # analyst_key: which analyst selection controls this section (None = always included)
-    # finalizing_agent: which agent must be "completed" for this report to count as done
+    # finalizing_agent: which agent must be "已完成" for this report to count as done
     REPORT_SECTIONS = {
         "market_report": ("market", "Market Analyst"),
         "sentiment_report": ("social", "Social Analyst"),
@@ -95,12 +95,12 @@ class MessageBuffer:
         # Add selected analysts
         for analyst_key in self.selected_analysts:
             if analyst_key in self.ANALYST_MAPPING:
-                self.agent_status[self.ANALYST_MAPPING[analyst_key]] = "pending"
+                self.agent_status[self.ANALYST_MAPPING[analyst_key]] = "待处理"
 
         # Add fixed teams
         for team_agents in self.FIXED_AGENTS.values():
             for agent in team_agents:
-                self.agent_status[agent] = "pending"
+                self.agent_status[agent] = "待处理"
 
         # Build report_sections dynamically
         self.report_sections = {}
@@ -121,7 +121,7 @@ class MessageBuffer:
 
         A report is considered complete when:
         1. The report section has content (not None), AND
-        2. The agent responsible for finalizing that report has status "completed"
+        2. The agent responsible for finalizing that report has status "已完成"
 
         This prevents interim updates (like debate rounds) from counting as completed.
         """
@@ -132,7 +132,7 @@ class MessageBuffer:
             _, finalizing_agent = self.REPORT_SECTIONS[section]
             # Report is complete if it has content AND its finalizing agent is done
             has_content = self.report_sections.get(section) is not None
-            agent_done = self.agent_status.get(finalizing_agent) == "completed"
+            agent_done = self.agent_status.get(finalizing_agent) == "已完成"
             if has_content and agent_done:
                 count += 1
         return count
@@ -169,13 +169,13 @@ class MessageBuffer:
         if latest_section and latest_content:
             # Format the current section for display
             section_titles = {
-                "market_report": "Market Analysis",
-                "sentiment_report": "Social Sentiment",
-                "news_report": "News Analysis",
-                "fundamentals_report": "Fundamentals Analysis",
-                "investment_plan": "Research Team Decision",
-                "trader_investment_plan": "Trading Team Plan",
-                "final_trade_decision": "Portfolio Management Decision",
+                "market_report": "市场分析",
+                "sentiment_report": "社交情绪",
+                "news_report": "新闻分析",
+                "fundamentals_report": "基本面分析",
+                "investment_plan": "研究团队决策",
+                "trader_investment_plan": "交易团队计划",
+                "final_trade_decision": "投资组合管理决策",
             }
             self.current_report = (
                 f"### {section_titles[latest_section]}\n{latest_content}"
@@ -190,7 +190,7 @@ class MessageBuffer:
         # Analyst Team Reports - use .get() to handle missing sections
         analyst_sections = ["market_report", "sentiment_report", "news_report", "fundamentals_report"]
         if any(self.report_sections.get(section) for section in analyst_sections):
-            report_parts.append("## Analyst Team Reports")
+            report_parts.append("## 分析师团队报告")
             if self.report_sections.get("market_report"):
                 report_parts.append(
                     f"### Market Analysis\n{self.report_sections['market_report']}"
@@ -210,12 +210,12 @@ class MessageBuffer:
 
         # Research Team Reports
         if self.report_sections.get("investment_plan"):
-            report_parts.append("## Research Team Decision")
+            report_parts.append("## 研究团队决策")
             report_parts.append(f"{self.report_sections['investment_plan']}")
 
         # Trading Team Reports
         if self.report_sections.get("trader_investment_plan"):
-            report_parts.append("## Trading Team Plan")
+            report_parts.append("## 交易团队计划")
             report_parts.append(f"{self.report_sections['trader_investment_plan']}")
 
         # Portfolio Management Decision
@@ -256,9 +256,9 @@ def update_display(layout, spinner_text=None, stats_handler=None, start_time=Non
     # Header with welcome message
     layout["header"].update(
         Panel(
-            "[bold green]Welcome to TradingAgents CLI[/bold green]\n"
+            "[bold green]欢迎使用 TradingAgents CLI[/bold green]\n"
             "[dim]© [Tauric Research](https://github.com/TauricResearch)[/dim]",
-            title="Welcome to TradingAgents",
+            title="欢迎使用 TradingAgents",
             border_style="green",
             padding=(1, 2),
             expand=True,
@@ -275,22 +275,22 @@ def update_display(layout, spinner_text=None, stats_handler=None, start_time=Non
         padding=(0, 2),  # Add horizontal padding
         expand=True,  # Make table expand to fill available space
     )
-    progress_table.add_column("Team", style="cyan", justify="center", width=20)
+    progress_table.add_column("团队", style="cyan", justify="center", width=20)
     progress_table.add_column("Agent", style="green", justify="center", width=20)
-    progress_table.add_column("Status", style="yellow", justify="center", width=20)
+    progress_table.add_column("状态", style="yellow", justify="center", width=20)
 
     # Group agents by team - filter to only include agents in agent_status
     all_teams = {
-        "Analyst Team": [
+        "分析师团队": [
             "Market Analyst",
             "Social Analyst",
             "News Analyst",
             "Fundamentals Analyst",
         ],
-        "Research Team": ["Bull Researcher", "Bear Researcher", "Research Manager"],
-        "Trading Team": ["Trader"],
-        "Risk Management": ["Aggressive Analyst", "Neutral Analyst", "Conservative Analyst"],
-        "Portfolio Management": ["Portfolio Manager"],
+        "研究团队": ["Bull Researcher", "Bear Researcher", "Research Manager"],
+        "交易团队": ["Trader"],
+        "风险管理": ["Aggressive Analyst", "Neutral Analyst", "Conservative Analyst"],
+        "投资组合管理": ["Portfolio Manager"],
     }
 
     # Filter teams to only include agents that are in agent_status
@@ -303,34 +303,34 @@ def update_display(layout, spinner_text=None, stats_handler=None, start_time=Non
     for team, agents in teams.items():
         # Add first agent with team name
         first_agent = agents[0]
-        status = message_buffer.agent_status.get(first_agent, "pending")
-        if status == "in_progress":
+        status = message_buffer.agent_status.get(first_agent, "待处理")
+        if status == "进行中":
             spinner = Spinner(
                 "dots", text="[blue]in_progress[/blue]", style="bold cyan"
             )
             status_cell = spinner
         else:
             status_color = {
-                "pending": "yellow",
-                "completed": "green",
-                "error": "red",
+                "待处理": "yellow",
+                "已完成": "green",
+                "错误": "red",
             }.get(status, "white")
             status_cell = f"[{status_color}]{status}[/{status_color}]"
         progress_table.add_row(team, first_agent, status_cell)
 
         # Add remaining agents in team
         for agent in agents[1:]:
-            status = message_buffer.agent_status.get(agent, "pending")
-            if status == "in_progress":
+            status = message_buffer.agent_status.get(agent, "待处理")
+            if status == "进行中":
                 spinner = Spinner(
                     "dots", text="[blue]in_progress[/blue]", style="bold cyan"
                 )
                 status_cell = spinner
             else:
                 status_color = {
-                    "pending": "yellow",
-                    "completed": "green",
-                    "error": "red",
+                    "待处理": "yellow",
+                    "已完成": "green",
+                    "错误": "red",
                 }.get(status, "white")
                 status_cell = f"[{status_color}]{status}[/{status_color}]"
             progress_table.add_row("", agent, status_cell)
@@ -339,7 +339,7 @@ def update_display(layout, spinner_text=None, stats_handler=None, start_time=Non
         progress_table.add_row("─" * 20, "─" * 20, "─" * 20, style="dim")
 
     layout["progress"].update(
-        Panel(progress_table, title="Progress", border_style="cyan", padding=(1, 2))
+        Panel(progress_table, title="进度", border_style="cyan", padding=(1, 2))
     )
 
     # Messages panel showing recent messages and tool calls
@@ -391,7 +391,7 @@ def update_display(layout, spinner_text=None, stats_handler=None, start_time=Non
     layout["messages"].update(
         Panel(
             messages_table,
-            title="Messages & Tools",
+            title="消息 & 工具",
             border_style="blue",
             padding=(1, 2),
         )
@@ -402,7 +402,7 @@ def update_display(layout, spinner_text=None, stats_handler=None, start_time=Non
         layout["analysis"].update(
             Panel(
                 Markdown(message_buffer.current_report),
-                title="Current Report",
+                title="当前报告",
                 border_style="green",
                 padding=(1, 2),
             )
@@ -411,7 +411,7 @@ def update_display(layout, spinner_text=None, stats_handler=None, start_time=Non
         layout["analysis"].update(
             Panel(
                 "[italic]Waiting for analysis report...[/italic]",
-                title="Current Report",
+                title="当前报告",
                 border_style="green",
                 padding=(1, 2),
             )
@@ -420,7 +420,7 @@ def update_display(layout, spinner_text=None, stats_handler=None, start_time=Non
     # Footer with statistics
     # Agent progress - derived from agent_status dict
     agents_completed = sum(
-        1 for status in message_buffer.agent_status.values() if status == "completed"
+        1 for status in message_buffer.agent_status.values() if status == "已完成"
     )
     agents_total = len(message_buffer.agent_status)
 
@@ -467,11 +467,11 @@ def get_user_selections():
 
     # Create welcome box content
     welcome_content = f"{welcome_ascii}\n"
-    welcome_content += "[bold green]TradingAgents: Multi-Agents LLM Financial Trading Framework - CLI[/bold green]\n\n"
-    welcome_content += "[bold]Workflow Steps:[/bold]\n"
-    welcome_content += "I. Analyst Team → II. Research Team → III. Trader → IV. Risk Management → V. Portfolio Management\n\n"
+    welcome_content += "[bold green]TradingAgents: 多Agent LLM金融交易框架 - CLI[/bold green]\n\n"
+    welcome_content += "[bold]工作流程:[/bold]\n"
+    welcome_content += "I. 分析师团队 → II. 研究团队 → III. 交易员 → IV. 风险管理 → V. 投资组合管理\n\n"
     welcome_content += (
-        "[dim]Built by [Tauric Research](https://github.com/TauricResearch)[/dim]"
+        "[dim]由 [Tauric Research](https://github.com/TauricResearch) 构建[/dim]"
     )
 
     # Create and center the welcome box
@@ -808,18 +808,18 @@ def update_analyst_statuses(message_buffer, chunk):
         has_report = bool(chunk.get(report_key))
 
         if has_report:
-            message_buffer.update_agent_status(agent_name, "completed")
+            message_buffer.update_agent_status(agent_name, "已完成")
             message_buffer.update_report_section(report_key, chunk[report_key])
         elif not found_active:
-            message_buffer.update_agent_status(agent_name, "in_progress")
+            message_buffer.update_agent_status(agent_name, "进行中")
             found_active = True
         else:
-            message_buffer.update_agent_status(agent_name, "pending")
+            message_buffer.update_agent_status(agent_name, "待处理")
 
     # When all analysts complete, transition research team to in_progress
     if not found_active and selected:
-        if message_buffer.agent_status.get("Bull Researcher") == "pending":
-            message_buffer.update_agent_status("Bull Researcher", "in_progress")
+        if message_buffer.agent_status.get("Bull Researcher") == "待处理":
+            message_buffer.update_agent_status("Bull Researcher", "进行中")
 
 def extract_content_string(content):
     """Extract string content from various message formats.
@@ -1000,7 +1000,7 @@ def run_analysis():
 
         # Update agent status to in_progress for the first analyst
         first_analyst = f"{selections['analysts'][0].value.capitalize()} Analyst"
-        message_buffer.update_agent_status(first_analyst, "in_progress")
+        message_buffer.update_agent_status(first_analyst, "进行中")
         update_display(layout, stats_handler=stats_handler, start_time=start_time)
 
         # Create spinner text
@@ -1055,7 +1055,7 @@ def run_analysis():
 
                 # Only update status when there's actual content
                 if bull_hist or bear_hist:
-                    update_research_team_status("in_progress")
+                    update_research_team_status("进行中")
                 if bull_hist:
                     message_buffer.update_report_section(
                         "investment_plan", f"### Bull Researcher Analysis\n{bull_hist}"
@@ -1068,17 +1068,17 @@ def run_analysis():
                     message_buffer.update_report_section(
                         "investment_plan", f"### Research Manager Decision\n{judge}"
                     )
-                    update_research_team_status("completed")
-                    message_buffer.update_agent_status("Trader", "in_progress")
+                    update_research_team_status("已完成")
+                    message_buffer.update_agent_status("Trader", "进行中")
 
             # Trading Team
             if chunk.get("trader_investment_plan"):
                 message_buffer.update_report_section(
                     "trader_investment_plan", chunk["trader_investment_plan"]
                 )
-                if message_buffer.agent_status.get("Trader") != "completed":
-                    message_buffer.update_agent_status("Trader", "completed")
-                    message_buffer.update_agent_status("Aggressive Analyst", "in_progress")
+                if message_buffer.agent_status.get("Trader") != "已完成":
+                    message_buffer.update_agent_status("Trader", "已完成")
+                    message_buffer.update_agent_status("Aggressive Analyst", "进行中")
 
             # Risk Management Team - Handle Risk Debate State
             if chunk.get("risk_debate_state"):
@@ -1089,33 +1089,33 @@ def run_analysis():
                 judge = risk_state.get("judge_decision", "").strip()
 
                 if agg_hist:
-                    if message_buffer.agent_status.get("Aggressive Analyst") != "completed":
-                        message_buffer.update_agent_status("Aggressive Analyst", "in_progress")
+                    if message_buffer.agent_status.get("Aggressive Analyst") != "已完成":
+                        message_buffer.update_agent_status("Aggressive Analyst", "进行中")
                     message_buffer.update_report_section(
                         "final_trade_decision", f"### Aggressive Analyst Analysis\n{agg_hist}"
                     )
                 if con_hist:
-                    if message_buffer.agent_status.get("Conservative Analyst") != "completed":
-                        message_buffer.update_agent_status("Conservative Analyst", "in_progress")
+                    if message_buffer.agent_status.get("Conservative Analyst") != "已完成":
+                        message_buffer.update_agent_status("Conservative Analyst", "进行中")
                     message_buffer.update_report_section(
                         "final_trade_decision", f"### Conservative Analyst Analysis\n{con_hist}"
                     )
                 if neu_hist:
-                    if message_buffer.agent_status.get("Neutral Analyst") != "completed":
-                        message_buffer.update_agent_status("Neutral Analyst", "in_progress")
+                    if message_buffer.agent_status.get("Neutral Analyst") != "已完成":
+                        message_buffer.update_agent_status("Neutral Analyst", "进行中")
                     message_buffer.update_report_section(
                         "final_trade_decision", f"### Neutral Analyst Analysis\n{neu_hist}"
                     )
                 if judge:
-                    if message_buffer.agent_status.get("Portfolio Manager") != "completed":
-                        message_buffer.update_agent_status("Portfolio Manager", "in_progress")
+                    if message_buffer.agent_status.get("Portfolio Manager") != "已完成":
+                        message_buffer.update_agent_status("Portfolio Manager", "进行中")
                         message_buffer.update_report_section(
                             "final_trade_decision", f"### Portfolio Manager Decision\n{judge}"
                         )
-                        message_buffer.update_agent_status("Aggressive Analyst", "completed")
-                        message_buffer.update_agent_status("Conservative Analyst", "completed")
-                        message_buffer.update_agent_status("Neutral Analyst", "completed")
-                        message_buffer.update_agent_status("Portfolio Manager", "completed")
+                        message_buffer.update_agent_status("Aggressive Analyst", "已完成")
+                        message_buffer.update_agent_status("Conservative Analyst", "已完成")
+                        message_buffer.update_agent_status("Neutral Analyst", "已完成")
+                        message_buffer.update_agent_status("Portfolio Manager", "已完成")
 
             # Update the display
             update_display(layout, stats_handler=stats_handler, start_time=start_time)
@@ -1128,7 +1128,7 @@ def run_analysis():
 
         # Update all agent statuses to completed
         for agent in message_buffer.agent_status:
-            message_buffer.update_agent_status(agent, "completed")
+            message_buffer.update_agent_status(agent, "已完成")
 
         message_buffer.add_message(
             "System", f"Completed analysis for {selections['analysis_date']}"

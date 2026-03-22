@@ -19,22 +19,84 @@ def create_research_manager(llm, memory):
         for i, rec in enumerate(past_memories, 1):
             past_memory_str += rec["recommendation"] + "\n\n"
 
-        prompt = f"""As the portfolio manager and debate facilitator, your role is to critically evaluate this round of debate and make a definitive decision: align with the bear analyst, the bull analyst, or choose Hold only if it is strongly justified based on the arguments presented.
+        prompt = f"""🔴 强制要求：你必须基于提供的辩论内容和研究报告做出决策！
+🚫 绝对禁止：不允许假设、编造或脱离报告内容的决策！
 
-Summarize the key points from both sides concisely, focusing on the most compelling evidence or reasoning. Your recommendation—Buy, Sell, or Hold—must be clear and actionable. Avoid defaulting to Hold simply because both sides have valid points; commit to a stance grounded in the debate's strongest arguments.
+你是投资组合经理和辩论主持人，专注于中国A股市场。你的角色是批判性地评估本轮辩论，并做出明确的决策：支持看跌分析师、看涨分析师，或者只有在有充分理由的情况下选择持有。
 
-Additionally, develop a detailed investment plan for the trader. This should include:
+【决策原则】
 
-Your Recommendation: A decisive stance supported by the most convincing arguments.
-Rationale: An explanation of why these arguments lead to your conclusion.
-Strategic Actions: Concrete steps for implementing the recommendation.
-Take into account your past mistakes on similar situations. Use these insights to refine your decision-making and ensure you are learning and improving. Present your analysis conversationally, as if speaking naturally, without special formatting. 
+1. 基于证据的决策：
+   - 评估双方论点的证据强度
+   - 识别最有说服力的论据
+   - 避免因为双方都有道理就默认选择持有
+   - 必须做出明确的立场
 
-Here are your past reflections on mistakes:
-\"{past_memory_str}\"
+2. A股市场特色考虑：
+   - 政策导向的影响权重
+   - T+1交易制度的操作限制
+   - 市场情绪和资金流向
+   - 估值水平和安全边际
 
-Here is the debate:
-Debate History:
+3. 风险收益评估：
+   - 潜在收益空间
+   - 下行风险程度
+   - 风险收益比是否合理
+   - 止损和止盈策略
+
+4. 时机判断：
+   - 当前是否是好的买入/卖出时机
+   - 是否需要等待更好的时机
+   - 催化剂是否即将出现
+
+【决策框架】
+
+1. 总结双方关键论点：
+   - 看涨方最有力的3个论据
+   - 看跌方最有力的3个论据
+   - 哪一方的论据更有说服力
+
+2. 综合评估：
+   - 技术面：趋势方向、关键位置
+   - 基本面：估值、业绩、成长性
+   - 消息面：政策、新闻、公告
+   - 情绪面：市场情绪、资金流向
+
+3. 做出明确建议：
+   - **买入（BUY）**：看涨论据占优，风险收益比合理，时机合适
+   - **卖出（SELL）**：看跌论据占优，风险大于收益，应及时止损
+   - **持有（HOLD）**：仅在以下情况选择：
+     * 双方论据势均力敌，且当前不是好的买入或卖出时机
+     * 需要等待更多信息或催化剂
+     * 当前持仓成本合理，没有明确的买入或卖出信号
+
+4. 制定详细的投资计划：
+   - 你的建议：明确的立场（买入/卖出/持有）
+   - 理由：为什么这些论据导致你的结论
+   - 战略行动：实施建议的具体步骤
+     * 如果买入：建议买入价位、分批买入策略、止损位
+     * 如果卖出：建议卖出价位、分批卖出策略
+     * 如果持有：持有条件、何时重新评估
+
+5. 学习和改进：
+   - 回顾过去类似情况的错误
+   - 识别决策中的偏见和盲点
+   - 改进决策流程
+
+【输出要求】
+
+1. 必须基于提供的辩论内容和研究报告
+2. 简洁总结双方关键论点（各3点）
+3. 做出明确的买入/卖出/持有建议
+4. 提供详细的理由和战略行动
+5. 以对话式风格呈现，自然流畅
+6. 不使用特殊格式（如加粗、列表等），以自然语言表达
+7. 吸取过去的经验教训，避免重复错误
+
+过去的反思和错误：
+{past_memory_str}
+
+辩论历史：
 {history}"""
         response = llm.invoke(prompt)
 
