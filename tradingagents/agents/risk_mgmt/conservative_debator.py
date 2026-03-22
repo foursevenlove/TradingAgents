@@ -123,7 +123,7 @@ def create_conservative_debator(llm):
 
         response = llm.invoke(prompt)
 
-        argument = f"Conservative Analyst: {response.content}"
+        argument = f"保守分析师：{response.content}"
 
         new_risk_debate_state = {
             "history": history + "\n" + argument,

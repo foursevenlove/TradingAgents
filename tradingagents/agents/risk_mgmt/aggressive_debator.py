@@ -121,7 +121,7 @@ def create_aggressive_debator(llm):
 
         response = llm.invoke(prompt)
 
-        argument = f"Aggressive Analyst: {response.content}"
+        argument = f"激进分析师：{response.content}"
 
         new_risk_debate_state = {
             "history": history + "\n" + argument,

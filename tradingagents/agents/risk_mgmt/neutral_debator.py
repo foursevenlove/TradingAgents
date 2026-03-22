@@ -120,7 +120,7 @@ def create_neutral_debator(llm):
 
         response = llm.invoke(prompt)
 
-        argument = f"Neutral Analyst: {response.content}"
+        argument = f"中立分析师：{response.content}"
 
         new_risk_debate_state = {
             "history": history + "\n" + argument,

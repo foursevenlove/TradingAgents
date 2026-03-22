@@ -144,7 +144,7 @@ def create_bear_researcher(llm, memory):
 
         response = llm.invoke(prompt)
 
-        argument = f"Bear Analyst: {response.content}"
+        argument = f"看跌分析师：{response.content}"
 
         new_investment_debate_state = {
             "history": history + "\n" + argument,

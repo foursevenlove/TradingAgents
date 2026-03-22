@@ -127,7 +127,7 @@ def create_bull_researcher(llm, memory):
 
         response = llm.invoke(prompt)
 
-        argument = f"Bull Analyst: {response.content}"
+        argument = f"看涨分析师：{response.content}"
 
         new_investment_debate_state = {
             "history": history + "\n" + argument,
