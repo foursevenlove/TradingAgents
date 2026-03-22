@@ -1009,6 +1009,11 @@ def run_analysis():
         )
         update_display(layout, spinner_text, stats_handler=stats_handler, start_time=start_time)
 
+        # 初始化日志
+        from tradingagents.utils.agent_logger import get_logger
+        logger = get_logger()
+        logger.start_session(selections["ticker"], selections["analysis_date"], selections["analysis_date"])
+
         # Initialize state and get graph args with callbacks
         init_agent_state = graph.propagator.create_initial_state(
             selections["ticker"], selections["analysis_date"]
@@ -1019,7 +1024,14 @@ def run_analysis():
 
         # Stream the analysis
         trace = []
+        current_agent_idx = None
         for chunk in graph.graph.stream(init_agent_state, **args):
+            # 记录agent执行
+            for key in chunk.keys():
+                if key != "messages" and key not in ["investment_debate_state", "risk_debate_state",
+                                                       "trader_investment_plan", "final_trade_decision"]:
+                    current_agent_idx = logger.log_agent_start(key)
+
             # Process messages if present (skip duplicates via message ID)
             if len(chunk["messages"]) > 0:
                 last_message = chunk["messages"][-1]
@@ -1040,8 +1052,16 @@ def run_analysis():
                                 message_buffer.add_tool_call(
                                     tool_call["name"], tool_call["args"]
                                 )
+                                if current_agent_idx is not None:
+                                    logger.log_tool_call(current_agent_idx, tool_call["name"], tool_call["args"])
                             else:
                                 message_buffer.add_tool_call(tool_call.name, tool_call.args)
+                                if current_agent_idx is not None:
+                                    logger.log_tool_call(current_agent_idx, tool_call.name, tool_call.args)
+
+                    # 记录agent输出
+                    if current_agent_idx is not None and content:
+                        logger.log_agent_end(current_agent_idx, content[:1000])
 
             # Update analyst statuses based on report state (runs on every chunk)
             update_analyst_statuses(message_buffer, chunk)
@@ -1143,6 +1163,16 @@ def run_analysis():
 
     # Post-analysis prompts (outside Live context for clean interaction)
     console.print("\n[bold cyan]Analysis Complete![/bold cyan]\n")
+
+    # 显示日志文件位置
+    from tradingagents.utils.agent_logger import get_logger
+    logger = get_logger()
+    if logger.current_session:
+        log_json = logger.log_dir / f"session_{logger.current_session}.json"
+        log_txt = logger.log_dir / f"session_{logger.current_session}.txt"
+        console.print(f"[green]✓[/green] 执行日志已保存:")
+        console.print(f"  - JSON格式: [cyan]{log_json}[/cyan]")
+        console.print(f"  - 文本格式: [cyan]{log_txt}[/cyan]\n")
 
     # Prompt to save report
     save_choice = typer.prompt("Save report?", default="Y").strip().upper()

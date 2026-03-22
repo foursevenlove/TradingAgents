@@ -38,6 +38,7 @@ from .setup import GraphSetup
 from .propagation import Propagator
 from .reflection import Reflector
 from .signal_processing import SignalProcessor
+from tradingagents.utils.agent_logger import get_logger
 
 
 class TradingAgentsGraph:
@@ -191,6 +192,10 @@ class TradingAgentsGraph:
 
         self.ticker = company_name
 
+        # 开始日志会话
+        logger = get_logger()
+        logger.start_session(company_name, str(trade_date), str(trade_date))
+
         # Initialize state
         init_agent_state = self.propagator.create_initial_state(
             company_name, trade_date
@@ -206,11 +211,15 @@ class TradingAgentsGraph:
                 else:
                     chunk["messages"][-1].pretty_print()
                     trace.append(chunk)
+                    # 记录agent执行
+                    self._log_chunk(chunk)
 
             final_state = trace[-1]
         else:
             # Standard mode without tracing
-            final_state = self.graph.invoke(init_agent_state, **args)
+            for chunk in self.graph.stream(init_agent_state, **args):
+                self._log_chunk(chunk)
+            final_state = chunk
 
         # Store current state for reflection
         self.curr_state = final_state
@@ -218,8 +227,38 @@ class TradingAgentsGraph:
         # Log state
         self._log_state(trade_date, final_state)
 
+        # 保存日志
+        logger.save_session()
+
         # Return decision and processed signal
         return final_state, self.process_signal(final_state["final_trade_decision"])
+
+    def _log_chunk(self, chunk):
+        """记录每个chunk的执行信息"""
+        logger = get_logger()
+
+        # 获取当前执行的节点名称
+        for node_name, node_data in chunk.items():
+            if node_name == "messages":
+                continue
+
+            # 记录agent开始
+            agent_idx = logger.log_agent_start(node_name)
+
+            # 记录消息内容
+            if "messages" in chunk and chunk["messages"]:
+                msg = chunk["messages"][-1]
+                if hasattr(msg, "content"):
+                    logger.log_agent_end(agent_idx, msg.content)
+
+                # 记录工具调用
+                if hasattr(msg, "tool_calls") and msg.tool_calls:
+                    for tool_call in msg.tool_calls:
+                        logger.log_tool_call(
+                            agent_idx,
+                            tool_call.get("name", "unknown"),
+                            tool_call.get("args", {})
+                        )
 
     def _log_state(self, trade_date, final_state):
         """Log the final state to a JSON file."""
