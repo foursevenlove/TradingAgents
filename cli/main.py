@@ -5,6 +5,8 @@ from pathlib import Path
 from functools import wraps
 from rich.console import Console
 from dotenv import load_dotenv
+from multiprocessing import Process, Queue
+import sys
 
 # Load environment variables from .env file
 load_dotenv()
@@ -1200,6 +1202,250 @@ def run_analysis():
 @app.command()
 def analyze():
     run_analysis()
+
+
+def run_single_stock_analysis(ticker: str, analysis_date: str, depth: int, result_queue: Queue):
+    """在独立进程中运行单只股票分析，完全复用交互式 CLI 的流程"""
+    import datetime as dt
+    import traceback as tb
+
+    def log(msg):
+        ts = dt.datetime.now().strftime("%H:%M:%S")
+        print(f"[{ts}][{ticker}] {msg}", flush=True)
+
+    try:
+        log("开始分析...")
+        load_dotenv()
+
+        config = DEFAULT_CONFIG.copy()
+        config["max_debate_rounds"] = depth
+        config["max_risk_discuss_rounds"] = depth
+
+        stats_handler = StatsCallbackHandler()
+        selected_analyst_keys = [a for a in ANALYST_ORDER]
+
+        graph = TradingAgentsGraph(
+            selected_analyst_keys,
+            config=config,
+            debug=False,
+            callbacks=[stats_handler],
+        )
+
+        # 创建目录结构（与交互式一致）
+        results_dir = Path(config["results_dir"]) / ticker / analysis_date
+        results_dir.mkdir(parents=True, exist_ok=True)
+        report_dir = results_dir / "reports"
+        report_dir.mkdir(parents=True, exist_ok=True)
+        log_file = results_dir / "message_tool.log"
+        log_file.touch(exist_ok=True)
+
+        # 创建独立的 message_buffer（每个进程独立，避免共享状态冲突）
+        local_buffer = MessageBuffer()
+        local_buffer.init_for_analysis(selected_analyst_keys)
+
+        # 复用交互式的 decorator 逻辑写文件
+        def save_message_decorator(obj, func_name):
+            func = getattr(obj, func_name)
+            @wraps(func)
+            def wrapper(*args, **kwargs):
+                func(*args, **kwargs)
+                timestamp, message_type, content = obj.messages[-1]
+                content = content.replace("\n", " ")
+                with open(log_file, "a", encoding="utf-8") as f:
+                    f.write(f"{timestamp} [{message_type}] {content}\n")
+            return wrapper
+
+        def save_tool_call_decorator(obj, func_name):
+            func = getattr(obj, func_name)
+            @wraps(func)
+            def wrapper(*args, **kwargs):
+                func(*args, **kwargs)
+                timestamp, tool_name, args = obj.tool_calls[-1]
+                args_str = ", ".join(f"{k}={v}" for k, v in args.items())
+                with open(log_file, "a", encoding="utf-8") as f:
+                    f.write(f"{timestamp} [Tool Call] {tool_name}({args_str})\n")
+            return wrapper
+
+        def save_report_section_decorator(obj, func_name):
+            func = getattr(obj, func_name)
+            @wraps(func)
+            def wrapper(section_name, content):
+                func(section_name, content)
+                if section_name in obj.report_sections and obj.report_sections[section_name] is not None:
+                    c = obj.report_sections[section_name]
+                    if c:
+                        with open(report_dir / f"{section_name}.md", "w", encoding="utf-8") as f:
+                            f.write(c)
+            return wrapper
+
+        local_buffer.add_message = save_message_decorator(local_buffer, "add_message")
+        local_buffer.add_tool_call = save_tool_call_decorator(local_buffer, "add_tool_call")
+        local_buffer.update_report_section = save_report_section_decorator(local_buffer, "update_report_section")
+
+        # 初始化日志
+        from tradingagents.utils.agent_logger import get_logger
+        from openai import InternalServerError
+        logger = get_logger()
+        logger.start_session(ticker, analysis_date, analysis_date)
+
+        init_agent_state = graph.propagator.create_initial_state(ticker, analysis_date)
+        args = graph.propagator.get_graph_args(callbacks=[stats_handler])
+
+        log("运行分析流程...")
+        trace = []
+        current_agent_idx = None
+        max_retries = 5
+        retry_delay = 10
+
+        for attempt in range(1, max_retries + 1):
+            try:
+                for chunk in graph.graph.stream(init_agent_state, **args):
+                    # 记录节点进度
+                    for key in chunk.keys():
+                        if key != "messages" and key not in ["investment_debate_state", "risk_debate_state",
+                                                               "trader_investment_plan", "final_trade_decision"]:
+                            current_agent_idx = logger.log_agent_start(key)
+                            log(f"  → {key}")
+
+                    # 处理消息
+                    if len(chunk["messages"]) > 0:
+                        last_message = chunk["messages"][-1]
+                        msg_id = getattr(last_message, "id", None)
+                        if msg_id != local_buffer._last_message_id:
+                            local_buffer._last_message_id = msg_id
+                            msg_type, content = classify_message_type(last_message)
+                            if content and content.strip():
+                                local_buffer.add_message(msg_type, content)
+                            if hasattr(last_message, "tool_calls") and last_message.tool_calls:
+                                for tool_call in last_message.tool_calls:
+                                    if isinstance(tool_call, dict):
+                                        local_buffer.add_tool_call(tool_call["name"], tool_call["args"])
+                                        if current_agent_idx is not None:
+                                            logger.log_tool_call(current_agent_idx, tool_call["name"], tool_call["args"])
+                                    else:
+                                        local_buffer.add_tool_call(tool_call.name, tool_call.args)
+                                        if current_agent_idx is not None:
+                                            logger.log_tool_call(current_agent_idx, tool_call.name, tool_call.args)
+                            if current_agent_idx is not None and content:
+                                logger.log_agent_end(current_agent_idx, content[:1000])
+
+                    # 复用交互式的 report section 更新逻辑
+                    if chunk.get("investment_debate_state"):
+                        debate_state = chunk["investment_debate_state"]
+                        bull_hist = debate_state.get("bull_history", "").strip()
+                        bear_hist = debate_state.get("bear_history", "").strip()
+                        judge = debate_state.get("judge_decision", "").strip()
+                        if bull_hist:
+                            local_buffer.update_report_section("investment_plan", f"### Bull Researcher Analysis\n{bull_hist}")
+                        if bear_hist:
+                            local_buffer.update_report_section("investment_plan", f"### Bear Researcher Analysis\n{bear_hist}")
+                        if judge:
+                            local_buffer.update_report_section("investment_plan", f"### Research Manager Decision\n{judge}")
+
+                    if chunk.get("trader_investment_plan"):
+                        local_buffer.update_report_section("trader_investment_plan", chunk["trader_investment_plan"])
+
+                    if chunk.get("risk_debate_state"):
+                        risk_state = chunk["risk_debate_state"]
+                        agg_hist = risk_state.get("aggressive_history", "").strip()
+                        con_hist = risk_state.get("conservative_history", "").strip()
+                        neu_hist = risk_state.get("neutral_history", "").strip()
+                        judge = risk_state.get("judge_decision", "").strip()
+                        if agg_hist:
+                            local_buffer.update_report_section("final_trade_decision", f"### Aggressive Analyst Analysis\n{agg_hist}")
+                        if con_hist:
+                            local_buffer.update_report_section("final_trade_decision", f"### Conservative Analyst Analysis\n{con_hist}")
+                        if neu_hist:
+                            local_buffer.update_report_section("final_trade_decision", f"### Neutral Analyst Analysis\n{neu_hist}")
+                        if judge:
+                            local_buffer.update_report_section("final_trade_decision", f"### Portfolio Manager Decision\n{judge}")
+
+                    trace.append(chunk)
+                break
+            except InternalServerError as e:
+                if attempt < max_retries:
+                    log(f"  API 服务端错误，{retry_delay}秒后重试 ({attempt}/{max_retries})...")
+                    import time as _time
+                    _time.sleep(retry_delay)
+                    retry_delay *= 2
+                    init_agent_state = graph.propagator.create_initial_state(ticker, analysis_date)
+                    trace = []
+                else:
+                    raise
+
+        final_state = trace[-1]
+
+        # 最终同步所有 report sections（与交互式一致）
+        for section in local_buffer.report_sections.keys():
+            if section in final_state:
+                local_buffer.update_report_section(section, final_state[section])
+
+        logger.save_session()
+        graph.curr_state = final_state
+        graph._log_state(analysis_date, final_state)
+
+        signal = graph.process_signal(final_state["final_trade_decision"])
+        log(f"✓ 完成，决策信号: {signal}")
+        result_queue.put({"ticker": ticker, "status": "success", "signal": signal})
+
+    except Exception as e:
+        print(f"[{ticker}] ✗ 失败: {str(e)}", flush=True)
+        print(tb.format_exc(), flush=True)
+        result_queue.put({"ticker": ticker, "status": "error", "error": str(e)})
+
+
+@app.command()
+def batch_analyze(
+    tickers: str = typer.Option(..., "--tickers", "-t", help="股票代码列表，逗号分隔，例如: 688347.SH,300274.SZ"),
+    date: Optional[str] = typer.Option(None, "--date", "-d", help="分析日期 (YYYY-MM-DD)，默认为今天"),
+    depth: int = typer.Option(1, "--depth", help="研究深度（辩论轮数）"),
+    max_workers: int = typer.Option(4, "--workers", "-w", help="最大并行进程数"),
+):
+    """批量分析多只股票（多进程并行）"""
+
+    ticker_list = [t.strip() for t in tickers.split(",")]
+    analysis_date = date or datetime.datetime.now().strftime("%Y-%m-%d")
+
+    console.print(f"\n[bold cyan]批量分析模式[/bold cyan]")
+    console.print(f"股票列表: {', '.join(ticker_list)}")
+    console.print(f"分析日期: {analysis_date}")
+    console.print(f"研究深度: {depth}")
+    console.print(f"并行进程数: {max_workers}\n")
+
+    result_queue = Queue()
+    processes = []
+
+    for i in range(0, len(ticker_list), max_workers):
+        batch = ticker_list[i:i+max_workers]
+        batch_processes = []
+
+        console.print(f"[yellow]启动批次 {i//max_workers + 1}: {', '.join(batch)}[/yellow]")
+
+        for ticker in batch:
+            p = Process(target=run_single_stock_analysis, args=(ticker, analysis_date, depth, result_queue))
+            p.start()
+            batch_processes.append(p)
+            processes.append(p)
+
+        for p in batch_processes:
+            p.join()
+
+    results = []
+    while not result_queue.empty():
+        results.append(result_queue.get())
+
+    console.print("\n[bold green]分析完成！[/bold green]\n")
+
+    success_count = sum(1 for r in results if r["status"] == "success")
+    error_count = len(results) - success_count
+
+    console.print(f"成功: {success_count} | 失败: {error_count}\n")
+
+    if error_count > 0:
+        console.print("[bold red]失败的股票:[/bold red]")
+        for r in results:
+            if r["status"] == "error":
+                console.print(f"  - {r['ticker']}: {r['error']}")
 
 
 if __name__ == "__main__":
