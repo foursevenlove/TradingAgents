@@ -2,6 +2,7 @@
 
 from datetime import datetime, timedelta
 from typing import Annotated
+import warnings
 import akshare as ak
 import pandas as pd
 from stockstats import wrap
@@ -106,16 +107,39 @@ def get_indicator(
         # Wrap the dataframe with stockstats
         stock_df = wrap(df_renamed)
 
-        # Calculate the indicator (this triggers stockstats calculation)
-        stock_df[indicator]
+        # Map indicator names to stockstats column names
+        # stockstats uses: boll_ub (upper), boll_lb (lower), boll_mid (middle)
+        indicator_mapping = {
+            "boll_upper": "boll_ub",
+            "boll_lower": "boll_lb",
+            "boll_mid": "boll_mid",
+            "boll_up": "boll_ub",
+            "boll_down": "boll_lb",
+        }
+        mapped_indicator = indicator_mapping.get(indicator, indicator)
 
-        # Select relevant columns for output
-        output_cols = ["Date", "Open", "High", "Low", "Close", "Volume", indicator]
+        # Handle boll indicators specially - stockstats generates boll_lb, boll_mid, boll_ub
+        # when accessing 'boll', so we need to calculate 'boll' first, then access the specific column
+        if mapped_indicator in ("boll_ub", "boll_lb", "boll_mid"):
+            stock_df["boll"]  # Calculate all boll columns first
+        else:
+            # Calculate the indicator (this triggers stockstats calculation)
+            # Some indicators like volume_ratio may raise UserWarning in stockstats or fail to calculate.
+            # Catch any failure (Exception or UserWarning) and return a graceful error.
+            try:
+                with warnings.catch_warnings():
+                    warnings.simplefilter("error", UserWarning)  # Turn warnings into exceptions
+                    stock_df[mapped_indicator]
+            except (Exception, UserWarning) as e:
+                return f"Unsupported indicator '{indicator}' for {symbol}"
+
+        # Select relevant columns for output (use mapped_indicator to get actual column name)
+        output_cols = ["Date", "Open", "High", "Low", "Close", "Volume", mapped_indicator]
         available_cols = [col for col in output_cols if col in stock_df.columns]
         result_df = stock_df[available_cols].copy()
 
-        if result_df.empty:
-            return f"Failed to calculate indicator '{indicator}' for {symbol}"
+        if result_df.empty or mapped_indicator not in result_df.columns:
+            return f"Unsupported indicator '{indicator}' for {symbol}"
 
         # Filter to requested date range
         result_df["Date"] = pd.to_datetime(result_df["Date"])

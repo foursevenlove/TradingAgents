@@ -43,7 +43,7 @@ class MiniMaxClient(BaseLLMClient):
             llm_kwargs["api_key"] = api_key
 
         # Pass through additional kwargs (timeout, max_retries, http_client, etc.)
-        for key in ("timeout", "max_retries", "api_key", "callbacks", "http_client", "http_async_client"):
+        for key in ("timeout", "max_retries", "api_key", "callbacks", "http_client", "http_async_client", "temperature"):
             if key in self.kwargs:
                 llm_kwargs[key] = self.kwargs[key]
 

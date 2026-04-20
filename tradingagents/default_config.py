@@ -12,6 +12,7 @@ DEFAULT_CONFIG = {
     "deep_think_llm": "MiniMax-M2.7",
     "quick_think_llm": "MiniMax-M2.5",
     "backend_url": "https://api.minimaxi.com/v1",
+    "temperature": 0.1,                 # Lower = more deterministic, better instruction following
     # Provider-specific thinking configuration
     "google_thinking_level": None,      # "high", "minimal", etc.
     "openai_reasoning_effort": None,    # "medium", "high", "low"

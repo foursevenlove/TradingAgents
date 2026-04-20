@@ -1,11 +1,30 @@
 """Akshare news data implementation for A-share market."""
 
+import re
 from datetime import datetime
 from typing import Annotated, Optional
 import akshare as ak
 import pandas as pd
 
 from .akshare_common import _convert_ticker_format, _format_to_csv, AkshareDataError
+
+
+def _parse_date_from_url(url: str) -> Optional[datetime]:
+    """Extract date from East Money news URL.
+
+    URLs like http://finance.eastmoney.com/a/202603163673069 contain
+    the date as YYYYMMDD in the path.
+    """
+    if not url:
+        return None
+    match = re.search(r"/a/(\d{8})", url)
+    if match:
+        date_str = match.group(1)
+        try:
+            return datetime.strptime(date_str, "%Y%m%d")
+        except ValueError:
+            return None
+    return None
 
 
 def get_news(
@@ -31,18 +50,37 @@ def get_news(
         stock_code, market = _convert_ticker_format(ticker)
 
         # Get stock news from East Money
-        # ak.stock_news_em returns recent news for the stock
-        df = ak.stock_news_em(symbol=stock_code)
+        # ak.stock_news_em expects format like "600176.SH" or "000001.SZ"
+        # so we need to reconstruct the full symbol
+        news_symbol = f"{stock_code}.{market.upper()}"
+        df = ak.stock_news_em(symbol=news_symbol)
 
         if df.empty:
             return f"No news found for {ticker}"
 
-        # Limit to recent news (e.g., last 20 items)
+        # Parse date from URL and sort by date descending to get newest first
+        date_range_info = ""
+        if "新闻链接" in df.columns:
+            df["_parsed_date"] = df["新闻链接"].apply(_parse_date_from_url)
+            # Drop rows where date parsing failed
+            df = df.dropna(subset=["_parsed_date"])
+            # Sort by parsed date descending (newest first)
+            df = df.sort_values("_parsed_date", ascending=False)
+            # Record date range before dropping helper column
+            dates = df["_parsed_date"]
+            if not dates.empty:
+                date_range_info = f"# Date range: {dates.min().strftime('%Y-%m-%d')} to {dates.max().strftime('%Y-%m-%d')}\n"
+            # Drop the helper column before outputting
+            df = df.drop(columns=["_parsed_date"])
+
+        # Limit to top 20 most recent items
         df = df.head(20)
 
         header = f"# News for {ticker}\n"
         header += f"# Retrieved on: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n"
         header += f"# Total items: {len(df)}\n"
+        if date_range_info:
+            header += date_range_info
 
         return _format_to_csv(df, header)
 
@@ -88,7 +126,7 @@ def get_global_news(
         return _format_to_csv(df, header)
 
     except Exception as e:
-        raise AkshareDataError(f"Failed to get global news: {str(e)}")
+        return f"No global news available (Baidu API temporarily unavailable: {str(e)})"
 
 
 def get_insider_transactions(
