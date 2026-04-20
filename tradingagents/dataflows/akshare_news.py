@@ -95,38 +95,68 @@ def get_global_news(
 ) -> str:
     """Get global financial news relevant to A-share market.
 
+    Uses 财联社 (cls) financial news + 新闻联播 (CCTV) macro policy news.
+    The former Baidu finance API (news_economic_baidu) has been discontinued.
+
     Args:
-        curr_date: Current date (optional, not used by akshare)
-        look_back_days: Number of days to look back (optional, not used by akshare)
-        limit: Maximum number of news items to return (default: 30)
+        curr_date: Current date (optional)
+        look_back_days: Number of days to look back (optional)
+        limit: Maximum number of news items to return (default: 20)
 
     Returns:
         CSV string containing global news data
-
-    Note:
-        akshare's news_economic_baidu doesn't support date filtering,
-        so curr_date and look_back_days are accepted but ignored for compatibility.
     """
     try:
-        # Get financial news
-        # ak.news_economic_baidu returns economic news
-        df = ak.news_economic_baidu()
+        all_news = []
 
-        if df.empty:
-            return "No global news available"
+        # Source 1: 财联社 (CLS) - real-time financial news feed
+        try:
+            df_cls = ak.stock_info_global_cls()
+            if not df_cls.empty:
+                # Rename columns to consistent format
+                df_cls = df_cls.rename(columns={
+                    "标题": "Title",
+                    "内容": "Content",
+                    "发布日期": "Date",
+                    "发布时间": "Time",
+                })
+                all_news.append(df_cls)
+        except Exception:
+            pass  # CLS may be temporarily unavailable
 
-        # Limit to recent news
-        max_items = limit if limit is not None else 30
+        # Source 2: 新闻联播 (CCTV) - macro policy news, very important for A-share policy analysis
+        if curr_date is not None:
+            cctv_date = curr_date.replace("-", "")
+            try:
+                df_cctv = ak.news_cctv(date=cctv_date)
+                if not df_cctv.empty:
+                    df_cctv = df_cctv.rename(columns={
+                        "date": "Date",
+                        "title": "Title",
+                        "content": "Content",
+                    })
+                    df_cctv["Source"] = "CCTV新闻联播"
+                    all_news.append(df_cctv)
+            except Exception:
+                pass  # CCTV data may not be available for this date yet
+
+        if not all_news:
+            return "No global news available (CLS and CCTV sources temporarily unavailable)"
+
+        df = pd.concat(all_news, ignore_index=True)
+
+        # Limit output
+        max_items = limit if limit is not None else 20
         df = df.head(max_items)
 
-        header = f"# Global financial news\n"
+        header = f"# Global financial news (财联社 + 新闻联播)\n"
         header += f"# Retrieved on: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n"
         header += f"# Total items: {len(df)}\n"
 
         return _format_to_csv(df, header)
 
     except Exception as e:
-        return f"No global news available (Baidu API temporarily unavailable: {str(e)})"
+        return f"No global news available ({str(e)})"
 
 
 def get_insider_transactions(

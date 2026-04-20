@@ -18,6 +18,19 @@ from tradingagents.agents.utils.news_data_tools import (
     get_insider_transactions,
     get_global_news
 )
+from tradingagents.agents.utils.ashare_market_tools import (
+    get_north_bound_flow,
+    get_margin_trading,
+    get_limit_up_down_stats,
+    get_dragon_tiger_list,
+    get_block_trade,
+    get_institutional_holdings,
+)
+from tradingagents.agents.utils.industry_tools import (
+    get_sw_industry,
+    get_industry_peers,
+    get_industry_performance,
+)
 
 def create_msg_delete():
     def delete_messages(state):

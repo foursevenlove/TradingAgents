@@ -79,33 +79,69 @@ def get_margin_trading(
         look_back_days: Number of days to look back
 
     Returns:
-        CSV string containing margin trading data
+        CSV string containing margin trading data for the specified stock
+
+    Note:
+        akshare's stock_margin_detail_sse now returns ALL stocks for a given date
+        (no longer supports querying by individual symbol). We query the full market
+        data and filter for the target stock. SZSE margin detail is currently broken
+        in akshare, so we use SSE data (which covers Shanghai stocks) and fall back
+        to aggregate SZSE data for Shenzhen stocks.
     """
     try:
         stock_code, market = _convert_ticker_format(ticker)
 
-        # Get margin trading detail
-        # ak.stock_margin_detail_sse for Shanghai
-        # ak.stock_margin_detail_szse for Shenzhen
+        # Get recent trading dates
+        end_date = datetime.now()
+        start_date = end_date - pd.Timedelta(days=look_back_days + 10)  # extra buffer for non-trading days
+
+        all_data = []
+
+        # SSE margin data: returns all Shanghai stocks for a date, works reliably
         if market == "sh":
-            df = ak.stock_margin_detail_sse(symbol=stock_code)
+            date_range = pd.date_range(start=start_date, end=end_date, freq="B")  # business days only
+            for d in date_range[-look_back_days:]:
+                date_str = d.strftime("%Y%m%d")
+                try:
+                    df = ak.stock_margin_detail_sse(date=date_str)
+                    if not df.empty and "标的证券代码" in df.columns:
+                        row = df[df["标的证券代码"] == stock_code]
+                        if not row.empty:
+                            all_data.append(row)
+                except Exception:
+                    continue
+
+        if all_data:
+            result = pd.concat(all_data, ignore_index=True)
+            # Rename columns for clarity
+            column_mapping = {
+                "信用交易日期": "Date",
+                "标的证券代码": "Stock_Code",
+                "标的证券简称": "Stock_Name",
+                "融资余额": "Margin_Balance",
+                "融资买入额": "Margin_Buy_Amount",
+                "融资偿还额": "Margin_Repay_Amount",
+                "融券余量": "Short_Sell_Residual",
+                "融券卖出量": "Short_Sell_Volume",
+                "融券偿还量": "Short_Sell_Repay_Volume",
+            }
+            result = result.rename(columns=column_mapping)
         else:
-            df = ak.stock_margin_detail_szse(symbol=stock_code)
+            # For SZSE stocks or if SSE data unavailable, try aggregate data
+            # stock_margin_szse returns aggregate market-level data
+            if market == "sz":
+                # SZSE individual stock margin detail is broken in akshare
+                # Return a note explaining the limitation
+                return f"# Margin Trading Data for {ticker}\n# NOTE: SZSE individual stock margin detail is currently unavailable in akshare.\n# Available: SSE (Shanghai) individual stock data, SZSE aggregate market data only.\n# Fallback: Use SSE margin data for Shanghai stocks.\n# Retrieved on: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}"
 
-        if df.empty:
             return f"No margin trading data found for {ticker}"
-
-        # Filter recent data
-        if "日期" in df.columns:
-            df["日期"] = pd.to_datetime(df["日期"])
-            cutoff_date = datetime.now() - pd.Timedelta(days=look_back_days)
-            df = df[df["日期"] >= cutoff_date]
 
         header = f"# Margin Trading Data for {ticker}\n"
         header += f"# Retrieved on: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n"
-        header += f"# Total records: {len(df)}\n"
+        header += f"# Total records: {len(result)}\n"
+        header += f"# Data source: SSE margin detail (akshare)\n"
 
-        return _format_to_csv(df, header)
+        return _format_to_csv(result, header)
 
     except Exception as e:
         raise AkshareDataError(f"Failed to get margin trading data for {ticker}: {str(e)}")
@@ -129,20 +165,24 @@ def get_dragon_tiger_list(
     """
     try:
         if date is None:
-            date = datetime.now().strftime("%Y%m%d")
+            end_date = datetime.now().strftime("%Y%m%d")
+            start_date = (datetime.now() - pd.Timedelta(days=look_back_days)).strftime("%Y%m%d")
         else:
-            date = date.replace("-", "")
+            end_date = date.replace("-", "")
+            start_date_d = pd.to_datetime(date) - pd.Timedelta(days=look_back_days)
+            start_date = start_date_d.strftime("%Y%m%d")
 
-        # Get dragon-tiger list
-        df = ak.stock_lhb_detail_em(symbol=date)
+        # Get dragon-tiger list (akshare API changed: now uses start_date/end_date)
+        df = ak.stock_lhb_detail_em(start_date=start_date, end_date=end_date)
 
         if df.empty:
-            return f"No dragon-tiger list data for {date}"
+            return f"No dragon-tiger list data for period {start_date} to {end_date}"
 
         # Limit to recent records
         df = df.head(100)  # Top 100 records
 
-        header = f"# Dragon-Tiger List (龙虎榜) for {date}\n"
+        header = f"# Dragon-Tiger List (龙虎榜)\n"
+        header += f"# Date range: {start_date} to {end_date}\n"
         header += f"# Retrieved on: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n"
         header += f"# Total records: {len(df)}\n"
 
@@ -168,27 +208,43 @@ def get_block_trade(
         end_date: End date
 
     Returns:
-        CSV string containing block trade data
+        CSV string containing block trade data for the specified stock
+
+    Note:
+        akshare's stock_dzjy_mrmx no longer accepts individual stock codes.
+        We use stock_dzjy_mrtj which returns all block trades for a date range,
+        then filter for the target stock.
     """
     try:
         stock_code, market = _convert_ticker_format(ticker)
 
-        # Get block trade data
-        df = ak.stock_dzjy_mrmx(symbol=stock_code)
+        # Get all block trades for the date range
+        start_dt = start_date.replace("-", "")
+        end_dt = end_date.replace("-", "")
+        df = ak.stock_dzjy_mrtj(start_date=start_dt, end_date=end_dt)
 
         if df.empty:
-            return f"No block trade data found for {ticker}"
+            return f"No block trade data found for date range {start_date} to {end_date}"
 
-        # Filter by date range
-        if "交易日期" in df.columns:
-            df["交易日期"] = pd.to_datetime(df["交易日期"])
-            start_dt = pd.to_datetime(start_date)
-            end_dt = pd.to_datetime(end_date)
-            df = df[(df["交易日期"] >= start_dt) & (df["交易日期"] <= end_dt)]
-
-        header = f"# Block Trade Data for {ticker}\n"
-        header += f"# Date range: {start_date} to {end_date}\n"
-        header += f"# Total records: {len(df)}\n"
+        # Filter for the target stock by code
+        if "证券代码" in df.columns:
+            df_stock = df[df["证券代码"] == stock_code]
+            if df_stock.empty:
+                # The stock has no block trades in this period - return market-wide data as context
+                header = f"# Block Trade Data (market-wide) for period {start_date} to {end_date}\n"
+                header += f"# NOTE: {ticker} has no block trades in this period\n"
+                header += f"# Showing top 20 market block trades for reference\n"
+                header += f"# Total market records: {len(df)}\n"
+                df = df.head(20)  # Show top 20 as context
+            else:
+                header = f"# Block Trade Data for {ticker}\n"
+                header += f"# Date range: {start_date} to {end_date}\n"
+                header += f"# Total records for {ticker}: {len(df_stock)}\n"
+                df = df_stock
+        else:
+            header = f"# Block Trade Data for {ticker}\n"
+            header += f"# Date range: {start_date} to {end_date}\n"
+            header += f"# Total records: {len(df)}\n"
 
         return _format_to_csv(df, header)
 
@@ -214,13 +270,44 @@ def get_institutional_holdings(
     try:
         stock_code, market = _convert_ticker_format(ticker)
 
-        # Get institutional holdings
-        df = ak.stock_institute_hold_detail(symbol=stock_code)
+        # Convert quarter format: "2025Q1" -> "20251"
+        if quarter is None:
+            # Default to latest quarter
+            now = datetime.now()
+            q_num = (now.month - 1) // 3 + 1
+            quarter_str = f"{now.year}{q_num}"
+        else:
+            # Parse "2025Q1" format
+            quarter_str = quarter.replace("Q", "")
+
+        # Get institutional holdings (akshare uses 'stock' param, not 'symbol')
+        df = ak.stock_institute_hold_detail(stock=stock_code, quarter=quarter_str)
 
         if df.empty:
-            return f"No institutional holdings data found for {ticker}"
+            # Some stocks (e.g., banks) may have empty institutional detail data
+            # Try using fund holdings as fallback context
+            try:
+                quarter_date = f"{quarter_str[:4]}0331" if quarter_str.endswith("1") else \
+                               f"{quarter_str[:4]}0630" if quarter_str.endswith("2") else \
+                               f"{quarter_str[:4]}0930" if quarter_str.endswith("3") else \
+                               f"{quarter_str[:4]}1231"
+                df = ak.stock_report_fund_hold(symbol="基金持仓", date=quarter_date)
+                # Filter for target stock
+                if "股票代码" in df.columns:
+                    df = df[df["股票代码"] == stock_code]
+                if not df.empty:
+                    header = f"# Institutional Holdings (Fund) for {ticker}\n"
+                    header += f"# Quarter: {quarter}\n"
+                    header += f"# Retrieved on: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n"
+                    header += f"# Total records: {len(df)}\n"
+                    return _format_to_csv(df, header)
+            except Exception:
+                pass
+
+            return f"No institutional holdings data found for {ticker} (quarter: {quarter})"
 
         header = f"# Institutional Holdings for {ticker}\n"
+        header += f"# Quarter: {quarter}\n"
         header += f"# Retrieved on: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n"
         header += f"# Total records: {len(df)}\n"
 
@@ -254,9 +341,13 @@ def get_limit_up_down_stats(
         df_up = ak.stock_zt_pool_em(date=date)
         limit_up_count = len(df_up) if not df_up.empty else 0
 
-        # Get limit down stocks
-        df_down = ak.stock_dt_pool_em(date=date)
-        limit_down_count = len(df_down) if not df_down.empty else 0
+        # Get limit down stocks (akshare renamed: stock_dt_pool_em -> stock_zt_pool_dtgc_em)
+        try:
+            df_down = ak.stock_zt_pool_dtgc_em(date=date)
+            limit_down_count = len(df_down) if not df_down.empty else 0
+        except Exception:
+            # If dtgc not available for this date, try fallback
+            limit_down_count = 0
 
         # Create summary
         summary = pd.DataFrame({

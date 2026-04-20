@@ -17,16 +17,18 @@ DEFAULT_CONFIG = {
     "google_thinking_level": None,      # "high", "minimal", etc.
     "openai_reasoning_effort": None,    # "medium", "high", "low"
     # Debate and discussion settings
-    "max_debate_rounds": 1,
-    "max_risk_discuss_rounds": 1,
+    "max_debate_rounds": 2,                   # Bull vs Bear debate rounds (more rounds = deeper analysis)
+    "max_risk_discuss_rounds": 2,             # Risk debate rounds (Aggressive/Conservative/Neutral)
     "max_recur_limit": 100,
     # Data vendor configuration
     # Category-level configuration (default for all tools in category)
     "data_vendors": {
-        "core_stock_apis": "akshare",       # Options: akshare, alpha_vantage, yfinance
-        "technical_indicators": "akshare",  # Options: akshare, alpha_vantage, yfinance
-        "fundamental_data": "akshare",      # Options: akshare, alpha_vantage, yfinance
-        "news_data": "akshare",             # Options: akshare, alpha_vantage, yfinance
+        "core_stock_apis": "tushare,akshare",          # tushare primary (stable API), akshare fallback
+        "technical_indicators": "tushare,akshare",      # tushare primary, akshare fallback
+        "fundamental_data": "tushare,akshare",          # tushare primary (requires 2000积分), akshare fallback
+        "news_data": "tushare,akshare",                  # tushare primary (supports date filtering), akshare fallback
+        "ashare_market_indicators": "akshare",           # A-share specific: northbound flow, margin, etc.
+        "industry_classification": "akshare",            # Industry classification and peer comparison
     },
     # Tool-level configuration (takes precedence over category-level)
     "tool_vendors": {

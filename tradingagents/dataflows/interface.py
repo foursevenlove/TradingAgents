@@ -23,6 +23,8 @@ from .alpha_vantage import (
     get_global_news as get_alpha_vantage_global_news,
 )
 from .alpha_vantage_common import AlphaVantageRateLimitError
+from .tushare_news import TushareDataError as TushareNewsDataError
+from .tushare_stock import TushareDataError as TushareStockDataError
 from .akshare import (
     get_stock as get_akshare_stock,
     get_indicator as get_akshare_indicator,
@@ -33,7 +35,39 @@ from .akshare import (
     get_news as get_akshare_news,
     get_global_news as get_akshare_global_news,
     get_insider_transactions as get_akshare_insider_transactions,
+    # A-share specific indicators
+    get_north_bound_flow as get_akshare_north_bound_flow,
+    get_margin_trading as get_akshare_margin_trading,
+    get_dragon_tiger_list as get_akshare_dragon_tiger_list,
+    get_block_trade as get_akshare_block_trade,
+    get_institutional_holdings as get_akshare_institutional_holdings,
+    get_limit_up_down_stats as get_akshare_limit_up_down_stats,
     AkshareDataError,
+)
+
+# Industry classification (akshare-based)
+from tradingagents.market_data.industry_classification import (
+    get_sw_industry as get_akshare_sw_industry,
+    get_industry_peers as get_akshare_industry_peers,
+    get_industry_performance as get_akshare_industry_performance,
+)
+
+# Tushare Pro news data
+from .tushare_news import (
+    get_news as get_tushare_news,
+    get_global_news as get_tushare_global_news,
+    get_insider_transactions as get_tushare_insider_transactions,
+    TushareDataError,
+)
+
+# Tushare Pro core stock and fundamentals data
+from .tushare_stock import (
+    get_stock as get_tushare_stock,
+    get_indicator as get_tushare_indicator,
+    get_fundamentals as get_tushare_fundamentals,
+    get_balance_sheet as get_tushare_balance_sheet,
+    get_cashflow as get_tushare_cashflow,
+    get_income_statement as get_tushare_income_statement,
 )
 
 # Configuration and routing logic
@@ -69,11 +103,31 @@ TOOLS_CATEGORIES = {
             "get_global_news",
             "get_insider_transactions",
         ]
+    },
+    "ashare_market_indicators": {
+        "description": "A-share market specific indicators (northbound flow, margin trading, etc.)",
+        "tools": [
+            "get_north_bound_flow",
+            "get_margin_trading",
+            "get_limit_up_down_stats",
+            "get_dragon_tiger_list",
+            "get_block_trade",
+            "get_institutional_holdings",
+        ]
+    },
+    "industry_classification": {
+        "description": "Industry classification and peer comparison",
+        "tools": [
+            "get_sw_industry",
+            "get_industry_peers",
+            "get_industry_performance",
+        ]
     }
 }
 
 VENDOR_LIST = [
     "akshare",
+    "tushare",
     "yfinance",
     "alpha_vantage",
 ]
@@ -83,51 +137,89 @@ VENDOR_METHODS = {
     # core_stock_apis
     "get_stock_data": {
         "akshare": get_akshare_stock,
+        "tushare": get_tushare_stock,
         "alpha_vantage": get_alpha_vantage_stock,
         "yfinance": get_YFin_data_online,
     },
     # technical_indicators
     "get_indicators": {
         "akshare": get_akshare_indicator,
+        "tushare": get_tushare_indicator,
         "alpha_vantage": get_alpha_vantage_indicator,
         "yfinance": get_stock_stats_indicators_window,
     },
     # fundamental_data
     "get_fundamentals": {
         "akshare": get_akshare_fundamentals,
+        "tushare": get_tushare_fundamentals,
         "alpha_vantage": get_alpha_vantage_fundamentals,
         "yfinance": get_yfinance_fundamentals,
     },
     "get_balance_sheet": {
         "akshare": get_akshare_balance_sheet,
+        "tushare": get_tushare_balance_sheet,
         "alpha_vantage": get_alpha_vantage_balance_sheet,
         "yfinance": get_yfinance_balance_sheet,
     },
     "get_cashflow": {
         "akshare": get_akshare_cashflow,
+        "tushare": get_tushare_cashflow,
         "alpha_vantage": get_alpha_vantage_cashflow,
         "yfinance": get_yfinance_cashflow,
     },
     "get_income_statement": {
         "akshare": get_akshare_income_statement,
+        "tushare": get_tushare_income_statement,
         "alpha_vantage": get_alpha_vantage_income_statement,
         "yfinance": get_yfinance_income_statement,
     },
     # news_data
     "get_news": {
         "akshare": get_akshare_news,
+        "tushare": get_tushare_news,
         "alpha_vantage": get_alpha_vantage_news,
         "yfinance": get_news_yfinance,
     },
     "get_global_news": {
         "akshare": get_akshare_global_news,
+        "tushare": get_tushare_global_news,
         "yfinance": get_global_news_yfinance,
         "alpha_vantage": get_alpha_vantage_global_news,
     },
     "get_insider_transactions": {
         "akshare": get_akshare_insider_transactions,
+        "tushare": get_tushare_insider_transactions,
         "alpha_vantage": get_alpha_vantage_insider_transactions,
         "yfinance": get_yfinance_insider_transactions,
+    },
+    # ashare_market_indicators
+    "get_north_bound_flow": {
+        "akshare": get_akshare_north_bound_flow,
+    },
+    "get_margin_trading": {
+        "akshare": get_akshare_margin_trading,
+    },
+    "get_limit_up_down_stats": {
+        "akshare": get_akshare_limit_up_down_stats,
+    },
+    "get_dragon_tiger_list": {
+        "akshare": get_akshare_dragon_tiger_list,
+    },
+    "get_block_trade": {
+        "akshare": get_akshare_block_trade,
+    },
+    "get_institutional_holdings": {
+        "akshare": get_akshare_institutional_holdings,
+    },
+    # industry_classification
+    "get_sw_industry": {
+        "akshare": get_akshare_sw_industry,
+    },
+    "get_industry_peers": {
+        "akshare": get_akshare_industry_peers,
+    },
+    "get_industry_performance": {
+        "akshare": get_akshare_industry_performance,
     },
 }
 
@@ -178,7 +270,7 @@ def route_to_vendor(method: str, *args, **kwargs):
 
         try:
             return impl_func(*args, **kwargs)
-        except AlphaVantageRateLimitError:
-            continue  # Only rate limits trigger fallback
+        except (AlphaVantageRateLimitError, TushareNewsDataError, TushareStockDataError):
+            continue  # Rate limits and Tushare config errors trigger fallback
 
     raise RuntimeError(f"No available vendor for '{method}'")

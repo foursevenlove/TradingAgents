@@ -30,7 +30,18 @@ from tradingagents.agents.utils.agent_utils import (
     get_income_statement,
     get_news,
     get_insider_transactions,
-    get_global_news
+    get_global_news,
+    # A-share specific market indicators
+    get_north_bound_flow,
+    get_margin_trading,
+    get_limit_up_down_stats,
+    get_dragon_tiger_list,
+    get_block_trade,
+    get_institutional_holdings,
+    # Industry classification
+    get_sw_industry,
+    get_industry_peers,
+    get_industry_performance,
 )
 
 from .conditional_logic import ConditionalLogic
@@ -165,6 +176,17 @@ class TradingAgentsGraph:
                     get_stock_data,
                     # Technical indicators
                     get_indicators,
+                    # A-share specific market indicators
+                    get_north_bound_flow,
+                    get_margin_trading,
+                    get_limit_up_down_stats,
+                    get_dragon_tiger_list,
+                    get_block_trade,
+                    get_institutional_holdings,
+                    # Industry classification
+                    get_sw_industry,
+                    get_industry_peers,
+                    get_industry_performance,
                 ]
             ),
             "social": ToolNode(
