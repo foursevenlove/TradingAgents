@@ -55,6 +55,7 @@ TradingAgents (A股版)
 ### 环境要求
 
 - Python 3.13+
+- Node.js 18+（Web UI 需要）
 - MiniMax API密钥（[申请地址](https://platform.minimaxi.com/)）
 
 ### 安装步骤
@@ -90,6 +91,32 @@ ANTHROPIC_API_KEY=your_anthropic_api_key_here
 ```bash
 python -m cli.main
 ```
+
+### 🌐 Web UI 界面
+
+项目提供基于 FastAPI + Vue3 的 Web 界面，支持浏览器中发起分析、实时观看多 Agent 协作过程。
+
+**一键启动**：
+
+```bash
+./scripts/start_web.sh
+```
+
+然后打开浏览器访问 http://localhost:8000
+
+**手动启动**（开发模式）：
+
+```bash
+# 终端1：启动后端
+uvicorn web.backend.app:app --reload --port 8000
+
+# 终端2：启动前端 dev server
+cd web/frontend
+npm install
+npm run dev
+```
+
+详见 [web/README.md](web/README.md)！
 
 ### 使用示例
 

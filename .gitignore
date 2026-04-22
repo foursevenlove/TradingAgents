@@ -226,3 +226,12 @@ reports/*
 
 logs
 logs/*
+
+# Node modules
+node_modules/
+
+# Evaluation results
+eval_results/
+
+# SQLite databases
+*.db

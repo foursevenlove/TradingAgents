@@ -47,6 +47,11 @@ class MiniMaxClient(BaseLLMClient):
             if key in self.kwargs:
                 llm_kwargs[key] = self.kwargs[key]
 
+        # Default timeout: 5 minutes per request. MiniMax reasoning models can be slow
+        # but if no response in 5 min it's almost certainly stuck.
+        if "timeout" not in llm_kwargs:
+            llm_kwargs["timeout"] = 300
+
         return ChatOpenAI(**llm_kwargs)
 
     def validate_model(self) -> bool:
