@@ -30,7 +30,8 @@
         </div>
         <div class="flex-1 min-w-0">
           <div class="flex items-center gap-2">
-            <span class="font-semibold text-gray-900">{{ task.ticker }}</span>
+            <span class="font-semibold text-gray-900">{{ task.stock_name || task.ticker }}</span>
+            <span class="text-xs text-gray-400">{{ task.ticker }}</span>
             <span class="text-xs text-gray-400">{{ task.trade_date }}</span>
             <span
               class="text-xs px-2 py-0.5 rounded-full font-medium"

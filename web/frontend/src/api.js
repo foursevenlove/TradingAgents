@@ -72,6 +72,9 @@ export const api = {
     return () => es.close()
   },
 
+  // ── Stock Search ─────────────────────────────────────────────────
+  searchStocks: (query, limit = 20) => get(`/api/stocks/search?query=${encodeURIComponent(query)}&limit=${limit}`),
+
   // ── Watchlist ────────────────────────────────────────────────
   getWatchlist: (enabledOnly = false) => get(`/api/watchlist?enabled_only=${enabledOnly}`),
   addStock: (ticker, name = '') => post('/api/watchlist', { ticker, name }),

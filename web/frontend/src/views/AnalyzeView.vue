@@ -4,7 +4,13 @@
     <div class="flex items-center justify-between mb-6">
       <div>
         <h1 class="text-xl font-bold text-gray-900">分析进程</h1>
-        <p class="text-sm text-gray-500">{{ ticker }} · {{ tradeDate }}</p>
+        <p class="text-sm text-gray-500">
+          <span v-if="stockName" class="font-medium">{{ stockName }}</span>
+          <span v-if="stockName && ticker" class="text-gray-400"> · </span>
+          <span class="text-gray-400">{{ ticker }}</span>
+          <span class="text-gray-400"> · </span>
+          <span>{{ tradeDate }}</span>
+        </p>
       </div>
       <div class="flex items-center gap-3">
         <span
@@ -78,7 +84,13 @@
         <div class="flex items-center justify-between">
           <div>
             <h2 class="text-lg font-bold text-gray-900">最终决策</h2>
-            <p class="text-sm text-gray-500">{{ ticker }} · {{ tradeDate }}</p>
+            <p class="text-sm text-gray-500">
+              <span v-if="stockName" class="font-medium">{{ stockName }}</span>
+              <span v-if="stockName && ticker" class="text-gray-400"> · </span>
+              <span class="text-gray-400">{{ ticker }}</span>
+              <span class="text-gray-400"> · </span>
+              <span>{{ tradeDate }}</span>
+            </p>
           </div>
           <div
             class="px-4 py-2 rounded-lg font-bold text-lg"
@@ -142,6 +154,7 @@ const router = useRouter()
 
 const events = ref([])
 const ticker = ref('')
+const stockName = ref('')
 const tradeDate = ref('')
 const status = ref('pending')
 const signal = ref('')
@@ -225,6 +238,7 @@ async function loadTaskInfo() {
   try {
     const info = await api.getStatus(props.taskId)
     ticker.value = info.ticker
+    stockName.value = info.stock_name || ''
     tradeDate.value = info.trade_date
     status.value = info.status
     signal.value = info.signal || ''

@@ -12,30 +12,56 @@
       </button>
     </div>
 
-    <!-- Add stock form -->
+    <!-- Add stock form with search -->
     <div class="bg-white rounded-xl border border-gray-200 p-4 mb-6">
       <div class="flex gap-3 items-end">
-        <div class="flex-1">
-          <label class="block text-xs font-medium text-gray-500 mb-1">股票代码</label>
+        <div class="flex-1 relative">
+          <label class="block text-xs font-medium text-gray-500 mb-1">搜索股票（代码或名称）</label>
           <input
-            v-model="newTicker"
-            @keyup.enter="addStock"
-            placeholder="如 600000.SH 或 000001.SZ"
+            v-model="searchQuery"
+            @input="onSearchInput"
+            @keyup.enter="selectFirstResult"
+            placeholder="输入股票代码或名称搜索..."
             class="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-primary-500"
           />
+          <!-- Search results dropdown -->
+          <div
+            v-if="searchResults.length > 0"
+            class="absolute z-10 mt-1 w-full bg-white border border-gray-200 rounded-lg shadow-lg max-h-60 overflow-y-auto"
+          >
+            <div
+              v-for="stock in searchResults"
+              :key="stock.ticker"
+              @click="selectStock(stock)"
+              class="px-3 py-2 hover:bg-gray-50 cursor-pointer flex items-center gap-3"
+            >
+              <span class="font-mono text-sm text-gray-900">{{ stock.ticker }}</span>
+              <span class="text-sm text-gray-600">{{ stock.name }}</span>
+            </div>
+          </div>
+          <!-- Loading indicator -->
+          <div v-if="searching" class="absolute right-3 top-9">
+            <div class="w-4 h-4 border-2 border-primary-600 border-t-transparent rounded-full animate-spin"></div>
+          </div>
         </div>
         <div class="flex-1">
-          <label class="block text-xs font-medium text-gray-500 mb-1">股票名称（可选）</label>
-          <input
-            v-model="newName"
-            @keyup.enter="addStock"
-            placeholder="如 浦发银行"
-            class="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-primary-500"
-          />
+          <label class="block text-xs font-medium text-gray-500 mb-1">已选股票</label>
+          <div v-if="selectedStock" class="flex items-center gap-2 px-3 py-2 bg-gray-100 rounded-lg">
+            <span class="font-mono text-sm text-gray-900">{{ selectedStock.ticker }}</span>
+            <span class="text-sm text-gray-600">{{ selectedStock.name }}</span>
+            <button @click="clearSelection" class="text-gray-400 hover:text-gray-600">
+              <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"></path>
+              </svg>
+            </button>
+          </div>
+          <div v-else class="px-3 py-2 text-sm text-gray-400">
+            请先搜索并选择股票
+          </div>
         </div>
         <button
           @click="addStock"
-          :disabled="!newTicker.trim()"
+          :disabled="!selectedStock"
           class="px-4 py-2 bg-primary-600 text-white rounded-lg hover:bg-primary-700 disabled:opacity-50 text-sm font-medium"
         >
           添加
@@ -149,8 +175,10 @@ import { watchlistStore as store } from '../stores/watchlistStore.js'
 import { api } from '../api.js'
 
 const router = useRouter()
-const newTicker = ref('')
-const newName = ref('')
+const searchQuery = ref('')
+const searchResults = ref([])
+const selectedStock = ref(null)
+const searching = ref(false)
 const batching = ref(false)
 const batchMsg = ref('')
 const saveMsg = ref('')
@@ -185,6 +213,8 @@ const CRON_TO_SCHEDULE = {
   '0 * * * *': 'every_1hour',
 }
 
+let searchTimeout = null
+
 onMounted(async () => {
   await store.loadStocks()
   await store.loadSchedule()
@@ -197,11 +227,49 @@ onMounted(async () => {
   scheduleForm.value.schedule_option = CRON_TO_SCHEDULE[cron] || 'weekday_9am'
 })
 
+async function onSearchInput() {
+  // Debounce search
+  if (searchTimeout) clearTimeout(searchTimeout)
+
+  if (!searchQuery.value.trim()) {
+    searchResults.value = []
+    return
+  }
+
+  searching.value = true
+  searchTimeout = setTimeout(async () => {
+    try {
+      const results = await api.searchStocks(searchQuery.value.trim())
+      searchResults.value = results
+    } catch (err) {
+      console.error('Search failed:', err)
+      searchResults.value = []
+    } finally {
+      searching.value = false
+    }
+  }, 300)
+}
+
+function selectStock(stock) {
+  selectedStock.value = stock
+  searchQuery.value = ''
+  searchResults.value = []
+}
+
+function selectFirstResult() {
+  if (searchResults.value.length > 0) {
+    selectStock(searchResults.value[0])
+  }
+}
+
+function clearSelection() {
+  selectedStock.value = null
+}
+
 async function addStock() {
-  if (!newTicker.value.trim()) return
-  await store.addStock(newTicker.value.trim(), newName.value.trim())
-  newTicker.value = ''
-  newName.value = ''
+  if (!selectedStock.value) return
+  await store.addStock(selectedStock.value.ticker, selectedStock.value.name)
+  clearSelection()
 }
 
 async function removeStock(id) {
