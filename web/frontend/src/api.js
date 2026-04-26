@@ -19,6 +19,7 @@ async function get(url) {
 export const api = {
   startAnalysis: (payload) => post('/api/analyze/start', payload),
   getStatus: (taskId) => get(`/api/analyze/${taskId}/status`),
+  cancelAnalysis: (taskId) => fetch(`${API_BASE}/api/analyze/${taskId}/cancel`, { method: 'POST' }).then(r => r.json()),
   getResult: (taskId) => get(`/api/analyze/${taskId}/result`),
   getHistory: (limit = 50, offset = 0) => get(`/api/history?limit=${limit}&offset=${offset}`),
   getHistoryDetail: (taskId) => get(`/api/history/${taskId}`),
@@ -70,4 +71,28 @@ export const api = {
     }
     return () => es.close()
   },
+
+  // ── Watchlist ────────────────────────────────────────────────
+  getWatchlist: (enabledOnly = false) => get(`/api/watchlist?enabled_only=${enabledOnly}`),
+  addStock: (ticker, name = '') => post('/api/watchlist', { ticker, name }),
+  removeStock: (id) => fetch(`${API_BASE}/api/watchlist/${id}`, { method: 'DELETE' }).then(r => r.json()),
+  updateStock: (id, enabled) => fetch(`${API_BASE}/api/watchlist/${id}`, {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ enabled }),
+  }).then(r => r.json()),
+
+  // ── Schedule ─────────────────────────────────────────────────
+  getSchedule: () => get('/api/schedule'),
+  updateSchedule: (body) => fetch(`${API_BASE}/api/schedule`, {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(body),
+  }).then(r => r.json()),
+  getSchedulerStatus: () => get('/api/scheduler/status'),
+
+  // ── Batch ────────────────────────────────────────────────────
+  startBatch: () => post('/api/batch/start', {}),
+  getBatchRuns: (limit = 50, offset = 0) => get(`/api/batch/runs?limit=${limit}&offset=${offset}`),
+  getBatchRun: (batchId) => get(`/api/batch/runs/${batchId}`),
 }

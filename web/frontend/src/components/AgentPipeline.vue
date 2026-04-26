@@ -8,7 +8,8 @@
       <div
         v-for="agent in agents"
         :key="agent.name"
-        class="flex items-center gap-3 p-2 rounded-lg transition-colors"
+        @click="selectAgent(agent)"
+        class="flex items-center gap-3 p-2 rounded-lg transition-colors cursor-pointer"
         :class="agentClass(agent)"
       >
         <div class="w-6 h-6 rounded-full flex items-center justify-center text-xs font-bold shrink-0"
@@ -24,6 +25,7 @@
           <div class="text-sm font-medium truncate">{{ agent.name }}</div>
           <div class="text-xs text-gray-400">{{ agentStatusText(agent) }}</div>
         </div>
+        <div v-if="isSelected(agent)" class="w-2 h-2 rounded-full bg-primary-500"></div>
       </div>
     </div>
   </div>
@@ -34,7 +36,10 @@ import { computed } from 'vue'
 
 const props = defineProps({
   events: { type: Array, default: () => [] },
+  selectedAgent: { type: String, default: '' },
 })
+
+const emit = defineEmits(['select-agent'])
 
 const agentOrder = [
   'Market Analyst',
@@ -98,7 +103,8 @@ const agents = computed(() => {
         statusMap['Risk Judge'] = 'completed'
       }
     } else if (ev.type === 'trader_plan') {
-      statusMap['Trader'] = 'completed'
+      // trader_plan means Trader is running (not completed yet)
+      if (!statusMap['Trader']) statusMap['Trader'] = 'running'
     } else if (ev.type === 'final_decision') {
       statusMap['Trader'] = 'completed'
     } else if (ev.type === 'completed') {
@@ -125,10 +131,20 @@ const agents = computed(() => {
   }))
 })
 
+function selectAgent(agent) {
+  emit('select-agent', agent.rawName)
+}
+
+function isSelected(agent) {
+  return props.selectedAgent === agent.rawName
+}
+
 function agentClass(agent) {
-  if (agent.status === 'running') return 'bg-primary-50 border border-primary-200'
-  if (agent.status === 'completed') return 'bg-green-50 border border-green-200'
-  return 'bg-gray-50 border border-gray-100'
+  const baseClass = 'cursor-pointer hover:shadow-sm'
+  if (isSelected(agent)) return 'bg-primary-100 border border-primary-300 ' + baseClass
+  if (agent.status === 'running') return 'bg-primary-50 border border-primary-200 ' + baseClass
+  if (agent.status === 'completed') return 'bg-green-50 border border-green-200 ' + baseClass
+  return 'bg-gray-50 border border-gray-100 ' + baseClass
 }
 
 function iconClass(agent) {

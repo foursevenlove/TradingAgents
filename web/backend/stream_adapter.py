@@ -283,10 +283,49 @@ class AnalysisRunner:
             if not isinstance(node_data, dict):
                 continue
 
+            # Skip tools_* nodes (they are internal, no agent events)
+            # Note: Msg Clear nodes are NOT skipped - they send agent_end for analysts
+            if node_name.startswith("tools_"):
+                continue
+
+            # Don't send agent_start for debate/trader nodes here.
+            # Debate agents' status is determined by debate_speech and debate_judge events.
+            # Trader's status is determined by trader_plan and final_decision events.
+            # Only send agent_start for Analyst nodes (they output messages).
+            debate_agent_nodes = [
+                "Bull Researcher", "Bear Researcher", "Research Manager",
+                "Aggressive Analyst", "Conservative Analyst", "Neutral Analyst", "Risk Judge",
+                "Trader",
+            ]
+            # For debate nodes, skip the agent_start here; let _handle_*_debate handle it
+            if node_name in debate_agent_nodes:
+                # Just update state, don't send agent_start yet
+                # Exception: Research Manager / Risk Judge don't return messages,
+                # so _handle_messages won't fire. We need to send agent_start here
+                # when their state key appears for the first time.
+                if node_name == "Research Manager" and node_name not in self._seen_agents:
+                    if "investment_debate_state" in node_data:
+                        self._seen_agents.add(node_name)
+                        await self._emit(EventType.AGENT_START, {"agent_name": node_name})
+                elif node_name == "Risk Judge" and node_name not in self._seen_agents:
+                    if "risk_debate_state" in node_data or "final_trade_decision" in node_data:
+                        self._seen_agents.add(node_name)
+                        await self._emit(EventType.AGENT_START, {"agent_name": node_name})
+            # For Analyst nodes, agent_start will be sent in _handle_messages when messages arrive
+            # For Msg Clear nodes, we only send agent_end (no agent_start, no _handle_messages)
+
             # Update accumulated state for non-message keys
             for key, value in node_data.items():
                 if key != "messages":
                     self.state[key] = value
+
+            # Msg Clear -> agent_end for the corresponding analyst (handle before messages)
+            if node_name.startswith("Msg Clear"):
+                raw = node_name.replace("Msg Clear ", "")
+                analyst_name = f"{raw} Analyst"
+                await self._emit(EventType.AGENT_END, {"agent_name": analyst_name})
+                # Skip message handling for Msg Clear (it only has RemoveMessage + placeholder)
+                continue
 
             messages = node_data.get("messages", [])
             if messages:
@@ -303,19 +342,26 @@ class AnalysisRunner:
             if "risk_debate_state" in node_data:
                 await self._handle_risk_debate(node_data["risk_debate_state"])
 
-            # Trader plan
+            # Trader plan - send agent_start first if not seen
             if "trader_investment_plan" in node_data and node_data["trader_investment_plan"]:
+                if "Trader" not in self._seen_agents:
+                    self._seen_agents.add("Trader")
+                    await self._emit(EventType.AGENT_START, {"agent_name": "Trader"})
                 await self._emit(EventType.TRADER_PLAN, {
                     "content": node_data["trader_investment_plan"],
                 })
 
-            # Final decision
+            # Final decision - mark Trader as completed
             if "final_trade_decision" in node_data and node_data["final_trade_decision"]:
                 if not self._final_decision_sent:
                     self._final_decision_sent = True
+                    if "Trader" not in self._seen_agents:
+                        self._seen_agents.add("Trader")
+                        await self._emit(EventType.AGENT_START, {"agent_name": "Trader"})
                     await self._emit(EventType.FINAL_DECISION, {
                         "content": node_data["final_trade_decision"],
                     })
+                    await self._emit(EventType.AGENT_END, {"agent_name": "Trader"})
 
             # Reports
             for report_key in ["market_report", "sentiment_report", "news_report", "fundamentals_report"]:
@@ -326,12 +372,6 @@ class AnalysisRunner:
                         "report_type": report_key,
                         "content": preview,
                     })
-
-            # Msg Clear -> agent_end for the corresponding analyst
-            if "Msg Clear" in node_name:
-                raw = node_name.replace("Msg Clear ", "")
-                analyst_name = f"{raw} Analyst"
-                await self._emit(EventType.AGENT_END, {"agent_name": analyst_name})
 
     async def _handle_messages(self, node_name: str, messages: list):
         if node_name not in self._seen_agents:
@@ -378,36 +418,37 @@ class AnalysisRunner:
         return node_name
 
     async def _handle_invest_debate(self, debate: Dict[str, Any]):
+        # Judge decision check FIRST — Research Manager does not increment count,
+        # so we must not rely on count alone to detect judge completion.
+        judge = debate.get("judge_decision", "")
+        if judge and not self._judge_decision_sent:
+            self._judge_decision_sent = True
+            # Send agent_start for agents not yet seen, then agent_end
+            for name in ["Bull Researcher", "Bear Researcher", "Research Manager"]:
+                if name not in self._seen_agents:
+                    self._seen_agents.add(name)
+                    await self._emit(EventType.AGENT_START, {"agent_name": name})
+            await self._emit(EventType.DEBATE_JUDGE, {
+                "judge": "Research Manager",
+                "decision": judge,
+            })
+            for name in ["Bull Researcher", "Bear Researcher", "Research Manager"]:
+                await self._emit(EventType.AGENT_END, {"agent_name": name})
+            return
+
         count = debate.get("count", 0)
         if count <= self._last_debate_count:
             return
         self._last_debate_count = count
 
-        # Judge decision
-        judge = debate.get("judge_decision", "")
-        if judge and not self._judge_decision_sent:
-            self._judge_decision_sent = True
-            # Mark Bull/Bear as completed, Research Manager as running then done
-            for name in ("Bull Researcher", "Bear Researcher"):
-                if name not in self._seen_agents:
-                    self._seen_agents.add(name)
-                    await self._emit(EventType.AGENT_START, {"agent_name": name})
-                await self._emit(EventType.AGENT_END, {"agent_name": name})
-            if "Research Manager" not in self._seen_agents:
-                self._seen_agents.add("Research Manager")
-                await self._emit(EventType.AGENT_START, {"agent_name": "Research Manager"})
-            await self._emit(EventType.DEBATE_JUDGE, {
-                "judge": "Research Manager",
-                "decision": judge,
-            })
-            await self._emit(EventType.AGENT_END, {"agent_name": "Research Manager"})
-            return
-
+        # Bull/Bear speech - send agent_start if not seen
+        # Note: bull_researcher prefixes with "看涨分析师", bear with "看跌分析师"
         current = debate.get("current_response", "")
-        if current.startswith("Bull"):
-            if "Bull Researcher" not in self._seen_agents:
-                self._seen_agents.add("Bull Researcher")
-                await self._emit(EventType.AGENT_START, {"agent_name": "Bull Researcher"})
+        if current.startswith("看涨"):
+            agent_name = "Bull Researcher"
+            if agent_name not in self._seen_agents:
+                self._seen_agents.add(agent_name)
+                await self._emit(EventType.AGENT_START, {"agent_name": agent_name})
             content = self._extract_last_line(debate.get("bull_history", ""))
             await self._emit(EventType.DEBATE_SPEECH, {
                 "side": "bull",
@@ -415,10 +456,11 @@ class AnalysisRunner:
                 "content": content,
                 "round": (count + 1) // 2,
             })
-        elif current.startswith("Bear"):
-            if "Bear Researcher" not in self._seen_agents:
-                self._seen_agents.add("Bear Researcher")
-                await self._emit(EventType.AGENT_START, {"agent_name": "Bear Researcher"})
+        elif current.startswith("看跌"):
+            agent_name = "Bear Researcher"
+            if agent_name not in self._seen_agents:
+                self._seen_agents.add(agent_name)
+                await self._emit(EventType.AGENT_START, {"agent_name": agent_name})
             content = self._extract_last_line(debate.get("bear_history", ""))
             await self._emit(EventType.DEBATE_SPEECH, {
                 "side": "bear",
@@ -428,30 +470,30 @@ class AnalysisRunner:
             })
 
     async def _handle_risk_debate(self, debate: Dict[str, Any]):
+        # Judge decision check FIRST — Risk Manager does not increment count,
+        # so we must not rely on count alone to detect judge completion.
+        judge = debate.get("judge_decision", "")
+        if judge and not self._risk_judge_sent:
+            self._risk_judge_sent = True
+            # Send agent_start for agents not yet seen, then agent_end
+            for name in ["Aggressive Analyst", "Conservative Analyst", "Neutral Analyst", "Risk Judge"]:
+                if name not in self._seen_agents:
+                    self._seen_agents.add(name)
+                    await self._emit(EventType.AGENT_START, {"agent_name": name})
+            await self._emit(EventType.DEBATE_JUDGE, {
+                "judge": "Risk Manager",
+                "decision": judge,
+            })
+            for name in ["Aggressive Analyst", "Conservative Analyst", "Neutral Analyst", "Risk Judge"]:
+                await self._emit(EventType.AGENT_END, {"agent_name": name})
+            return
+
         count = debate.get("count", 0)
         if count <= self._last_risk_count:
             return
         self._last_risk_count = count
 
-        # Judge decision
-        judge = debate.get("judge_decision", "")
-        if judge and not self._risk_judge_sent:
-            self._risk_judge_sent = True
-            for name in ("Aggressive Analyst", "Conservative Analyst", "Neutral Analyst"):
-                if name not in self._seen_agents:
-                    self._seen_agents.add(name)
-                    await self._emit(EventType.AGENT_START, {"agent_name": name})
-                await self._emit(EventType.AGENT_END, {"agent_name": name})
-            if "Risk Judge" not in self._seen_agents:
-                self._seen_agents.add("Risk Judge")
-                await self._emit(EventType.AGENT_START, {"agent_name": "Risk Judge"})
-            await self._emit(EventType.DEBATE_JUDGE, {
-                "judge": "Risk Manager",
-                "decision": judge,
-            })
-            await self._emit(EventType.AGENT_END, {"agent_name": "Risk Judge"})
-            return
-
+        # Risk debate speech - send agent_start if not seen
         speaker = debate.get("latest_speaker", "")
         if speaker.startswith("Aggressive"):
             side, content = "aggressive", debate.get("current_aggressive_response", "")

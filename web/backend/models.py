@@ -72,6 +72,7 @@ class TaskDetail(BaseModel):
     created_at: datetime
     completed_at: Optional[datetime] = None
     error: Optional[str] = None
+    signal: Optional[str] = None
     result: Optional[Dict[str, Any]] = None
     events: List[Dict[str, Any]] = Field(default_factory=list)
 

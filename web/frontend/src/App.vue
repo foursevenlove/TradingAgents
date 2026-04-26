@@ -14,6 +14,12 @@
               <router-link to="/" class="text-gray-600 hover:text-gray-900 px-3 py-2 text-sm font-medium" active-class="text-primary-600">
                 首页
               </router-link>
+              <router-link to="/watchlist" class="text-gray-600 hover:text-gray-900 px-3 py-2 text-sm font-medium" active-class="text-primary-600">
+                自选股
+              </router-link>
+              <router-link to="/batch" class="text-gray-600 hover:text-gray-900 px-3 py-2 text-sm font-medium" active-class="text-primary-600">
+                批量分析
+              </router-link>
               <router-link to="/history" class="text-gray-600 hover:text-gray-900 px-3 py-2 text-sm font-medium" active-class="text-primary-600">
                 历史记录
               </router-link>
@@ -23,6 +29,13 @@
             <span class="text-xs text-gray-400 hidden sm:inline">v0.2.1</span>
           </div>
         </div>
+      </div>
+      <!-- Mobile nav -->
+      <div class="sm:hidden flex justify-around border-t border-gray-100 py-1">
+        <router-link to="/" class="text-gray-500 text-xs py-1">首页</router-link>
+        <router-link to="/watchlist" class="text-gray-500 text-xs py-1">自选股</router-link>
+        <router-link to="/batch" class="text-gray-500 text-xs py-1">批量</router-link>
+        <router-link to="/history" class="text-gray-500 text-xs py-1">历史</router-link>
       </div>
     </nav>
 

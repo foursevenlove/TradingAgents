@@ -1,5 +1,6 @@
 """FastAPI entry point for TradingAgents Web UI."""
 import sqlite3
+from contextlib import asynccontextmanager
 from pathlib import Path
 
 from dotenv import load_dotenv
@@ -10,6 +11,8 @@ from fastapi.responses import FileResponse
 
 from .router import router
 from .config import WEB_CONFIG
+from .watchlist_router import router as watchlist_router, init_watchlist_manager
+from .scheduler_service import create_scheduler, get_scheduler
 
 # Load environment variables from .env file (same as CLI)
 load_dotenv()
@@ -28,13 +31,30 @@ def _cleanup_orphan_tasks():
         conn.commit()
 
 
-def create_app() -> FastAPI:
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    """Application lifespan: initialize scheduler on startup, cleanup on shutdown."""
+    # Startup
     _cleanup_orphan_tasks()
 
+    wm = init_watchlist_manager()
+    wm.recover_running_batches()
+
+    scheduler = create_scheduler(wm)
+    await scheduler.start()
+
+    yield
+
+    # Shutdown
+    await scheduler.stop()
+
+
+def create_app() -> FastAPI:
     app = FastAPI(
         title="TradingAgents Web UI",
         description="Web interface for multi-agent LLM financial trading analysis",
         version="0.2.1",
+        lifespan=lifespan,
     )
 
     app.add_middleware(
@@ -45,8 +65,9 @@ def create_app() -> FastAPI:
         allow_headers=["*"],
     )
 
-    # Mount API router first (higher priority)
+    # Mount API routers
     app.include_router(router)
+    app.include_router(watchlist_router)
 
     # Serve frontend static files if built
     frontend_dist = Path(WEB_CONFIG["frontend_dist"])

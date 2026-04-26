@@ -35,7 +35,8 @@ class TaskManager:
                     error TEXT,
                     signal TEXT,
                     result TEXT,
-                    config TEXT
+                    config TEXT,
+                    batch_id TEXT
                 )
                 """
             )
@@ -51,6 +52,11 @@ class TaskManager:
                 )
                 """
             )
+            # Add batch_id column if not exists (for older DBs)
+            try:
+                conn.execute("ALTER TABLE tasks ADD COLUMN batch_id TEXT")
+            except sqlite3.OperationalError:
+                pass
             conn.commit()
 
     def create_task(self, ticker: str, trade_date: str, config: dict) -> str:
@@ -73,7 +79,7 @@ class TaskManager:
 
         with sqlite3.connect(self._db_path) as conn:
             conn.execute(
-                "INSERT INTO tasks VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                "INSERT INTO tasks VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
                 (
                     task_id,
                     ticker,
@@ -85,6 +91,7 @@ class TaskManager:
                     None,
                     None,
                     json.dumps(config, ensure_ascii=False),
+                    None,  # batch_id
                 ),
             )
             conn.commit()
@@ -184,6 +191,7 @@ class TaskManager:
             created_at=datetime.fromisoformat(row["created_at"]),
             completed_at=datetime.fromisoformat(row["completed_at"]) if row["completed_at"] else None,
             error=row["error"],
+            signal=row["signal"],
             result=json.loads(row["result"]) if row["result"] else None,
             events=[
                 {
@@ -226,6 +234,26 @@ class TaskManager:
         with sqlite3.connect(self._db_path) as conn:
             row = conn.execute("SELECT COUNT(*) FROM tasks").fetchone()
             return row[0] if row else 0
+
+    def find_task_by_ticker_date(self, ticker: str, trade_date: str, status: str = "completed") -> Optional[dict]:
+        """Find a task by ticker and trade_date."""
+        with sqlite3.connect(self._db_path) as conn:
+            conn.row_factory = sqlite3.Row
+            row = conn.execute(
+                """SELECT * FROM tasks WHERE ticker = ? AND trade_date = ? AND status = ?
+                   ORDER BY created_at DESC LIMIT 1""",
+                (ticker, trade_date, status),
+            ).fetchone()
+        if not row:
+            return None
+        task = dict(row)
+        for key in ("result", "config"):
+            if task.get(key) and isinstance(task[key], str):
+                try:
+                    task[key] = json.loads(task[key])
+                except Exception:
+                    pass
+        return task
 
 
 # Global instance

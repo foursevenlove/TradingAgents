@@ -73,6 +73,28 @@ async def analyze_status(task_id: str):
     }
 
 
+@router.post("/api/analyze/{task_id}/cancel")
+async def analyze_cancel(task_id: str):
+    """Cancel a running analysis task."""
+    task = get_task_manager().get_task(task_id)
+    if not task:
+        raise HTTPException(status_code=404, detail="Task not found")
+
+    # Check if task is still running
+    if task["status"] not in ("pending", "running"):
+        raise HTTPException(status_code=400, detail="Task is not running")
+
+    # Signal the runner to stop
+    runner = get_runner(task_id)
+    if runner:
+        runner.cancel()
+
+    # Update task status
+    get_task_manager().update_status(task_id, TaskStatus.CANCELLED)
+
+    return {"task_id": task_id, "status": TaskStatus.CANCELLED.value}
+
+
 @router.get("/api/analyze/{task_id}/result")
 async def analyze_result(task_id: str):
     """Get full analysis result."""
@@ -171,44 +193,50 @@ async def history_detail(task_id: str):
 
 @router.get("/api/kline/{ticker}")
 async def kline_data(ticker: str, days: int = Query(90, ge=10, le=365)):
-    """Get K-line (OHLCV) data for a ticker via akshare."""
+    """Get K-line (OHLCV) data for a ticker using tradingagents' fallback-enabled data fetch."""
     import datetime
     import asyncio
+    import io
+    import csv
 
     def _fetch():
         try:
-            import akshare as ak
-            import pandas as pd
+            from tradingagents.dataflows.akshare_stock import get_stock
 
             end = datetime.date.today()
             start = end - datetime.timedelta(days=days + 30)  # extra buffer for trading days
 
-            # Normalize ticker: strip exchange suffix for akshare
-            symbol = ticker.split(".")[0]
-
-            df = ak.stock_zh_a_hist(
-                symbol=symbol,
-                period="daily",
-                start_date=start.strftime("%Y%m%d"),
-                end_date=end.strftime("%Y%m%d"),
-                adjust="qfq",
+            # Use tradingagents' built-in get_stock with fallback mechanism
+            csv_data = get_stock(
+                symbol=ticker,  # expects format like "600000.SH"
+                start_date=start.strftime("%Y-%m-%d"),
+                end_date=end.strftime("%Y-%m-%d"),
             )
-            # Rename columns
-            df = df.rename(columns={
-                "日期": "date", "开盘": "open", "最高": "high",
-                "最低": "low", "收盘": "close", "成交量": "volume",
-            })
-            df = df[["date", "open", "high", "low", "close", "volume"]].tail(days)
+
+            # Parse CSV response
+            lines = csv_data.strip().split('\n')
+            # Skip header lines (start with #) and empty lines
+            data_lines = [l for l in lines if l and not l.startswith('#')]
+            if not data_lines:
+                return {"error": "No data returned"}
+
+            # Parse CSV
+            reader = csv.DictReader(data_lines)
             records = []
-            for _, row in df.iterrows():
-                records.append({
-                    "time": str(row["date"])[:10],
-                    "open": float(row["open"]),
-                    "high": float(row["high"]),
-                    "low": float(row["low"]),
-                    "close": float(row["close"]),
-                    "volume": float(row["volume"]),
-                })
+            for row in reader:
+                # Ensure we have the required fields
+                if 'Date' in row and 'Open' in row:
+                    records.append({
+                        "time": row['Date'][:10],
+                        "open": float(row['Open']) if row['Open'] else 0,
+                        "high": float(row['High']) if row['High'] else 0,
+                        "low": float(row['Low']) if row['Low'] else 0,
+                        "close": float(row['Close']) if row['Close'] else 0,
+                        "volume": float(row.get('Volume', 0) or 0),
+                    })
+
+            # Take only the requested number of days
+            records = records[-days:]
             return records
         except Exception as e:
             return {"error": str(e)}

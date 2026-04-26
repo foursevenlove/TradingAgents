@@ -135,6 +135,9 @@ class WatchlistManager:
         if not row:
             return {}
         result = dict(row)
+        # Convert SQLite integer booleans to Python booleans
+        if "enabled" in result:
+            result["enabled"] = bool(result["enabled"])
         if result.get("config") and isinstance(result["config"], str):
             try:
                 result["config"] = json.loads(result["config"])
@@ -224,6 +227,42 @@ class WatchlistManager:
                 (batch_id,),
             ).fetchall()
         return [dict(r) for r in rows]
+
+    def get_skipped_stocks(self, batch_id: str, trade_date: str) -> List[dict]:
+        """Get stocks that were skipped because they already had completed tasks today."""
+        # Get the batch info to find which stocks were intended
+        batch = self.get_batch_run(batch_id)
+        if not batch:
+            return []
+
+        # Get all enabled stocks at the time (from watchlist)
+        stocks = self.list_stocks(enabled_only=True)
+
+        # Get tasks that were actually created for this batch
+        batch_tasks = self.get_batch_tasks(batch_id)
+        analyzed_tickers = {t["ticker"] for t in batch_tasks}
+
+        skipped = []
+        for stock in stocks:
+            if stock["ticker"] not in analyzed_tickers:
+                # Find the existing completed task for this ticker + date
+                with self._get_conn() as conn:
+                    row = conn.execute(
+                        """SELECT task_id, status, signal, completed_at FROM tasks
+                           WHERE ticker = ? AND trade_date = ? AND status = 'completed'
+                           ORDER BY created_at DESC LIMIT 1""",
+                        (stock["ticker"], trade_date),
+                    ).fetchone()
+                    if row:
+                        skipped.append({
+                            "ticker": stock["ticker"],
+                            "name": stock["name"],
+                            "reason": "已有今日分析结果",
+                            "existing_task_id": row["task_id"],
+                            "signal": row["signal"],
+                            "completed_at": row["completed_at"],
+                        })
+        return skipped
 
     def recover_running_batches(self):
         """On startup, recover any batch_runs that were left in 'running' state."""
