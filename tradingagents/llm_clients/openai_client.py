@@ -4,7 +4,7 @@ from typing import Any, Optional
 from langchain_openai import ChatOpenAI
 
 from .base_client import BaseLLMClient
-from .validators import validate_model
+from .validators import validate_model, get_provider_config
 
 
 class UnifiedChatOpenAI(ChatOpenAI):
@@ -27,7 +27,10 @@ class UnifiedChatOpenAI(ChatOpenAI):
 
 
 class OpenAIClient(BaseLLMClient):
-    """Client for OpenAI, Ollama, OpenRouter, and xAI providers."""
+    """Client for OpenAI, Ollama, OpenRouter, and xAI providers.
+
+    Configuration is loaded from llm_models.json - edit that file to add/remove models.
+    """
 
     def __init__(
         self,
@@ -43,21 +46,31 @@ class OpenAIClient(BaseLLMClient):
         """Return configured ChatOpenAI instance."""
         llm_kwargs = {"model": self.model}
 
-        if self.provider == "xai":
-            llm_kwargs["base_url"] = "https://api.x.ai/v1"
-            api_key = os.environ.get("XAI_API_KEY")
-            if api_key:
-                llm_kwargs["api_key"] = api_key
-        elif self.provider == "openrouter":
-            llm_kwargs["base_url"] = "https://openrouter.ai/api/v1"
-            api_key = os.environ.get("OPENROUTER_API_KEY")
-            if api_key:
-                llm_kwargs["api_key"] = api_key
-        elif self.provider == "ollama":
-            llm_kwargs["base_url"] = "http://localhost:11434/v1"
-            llm_kwargs["api_key"] = "ollama"  # Ollama doesn't require auth
-        elif self.base_url:
+        # Load config from llm_models.json
+        config = get_provider_config(self.provider)
+
+        # Set base_url based on provider
+        if self.base_url:
             llm_kwargs["base_url"] = self.base_url
+        elif self.provider == "xai":
+            llm_kwargs["base_url"] = config.get("default_base_url", "https://api.x.ai/v1")
+        elif self.provider == "openrouter":
+            llm_kwargs["base_url"] = config.get("default_base_url", "https://openrouter.ai/api/v1")
+        elif self.provider == "ollama":
+            llm_kwargs["base_url"] = config.get("default_base_url", "http://localhost:11434/v1")
+            llm_kwargs["api_key"] = "ollama"  # Ollama doesn't require auth
+        else:
+            default_url = config.get("default_base_url", "https://api.openai.com/v1")
+            if default_url:
+                llm_kwargs["base_url"] = default_url
+
+        # Get API key from environment
+        if self.provider not in ("ollama",):
+            api_key_env = config.get("api_key_env")
+            if api_key_env:
+                api_key = os.environ.get(api_key_env)
+                if api_key:
+                    llm_kwargs["api_key"] = api_key
 
         for key in ("timeout", "max_retries", "reasoning_effort", "api_key", "callbacks", "http_client", "http_async_client", "temperature"):
             if key in self.kwargs:

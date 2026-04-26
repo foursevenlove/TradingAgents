@@ -1,4 +1,8 @@
 import os
+from tradingagents.llm_clients.validators import get_default_settings
+
+# Load default LLM settings from llm_models.json
+_llm_defaults = get_default_settings()
 
 DEFAULT_CONFIG = {
     "project_dir": os.path.abspath(os.path.join(os.path.dirname(__file__), ".")),
@@ -7,31 +11,33 @@ DEFAULT_CONFIG = {
         os.path.abspath(os.path.join(os.path.dirname(__file__), ".")),
         "dataflows/data_cache",
     ),
-    # LLM settings
-    "llm_provider": "minimax",
-    "deep_think_llm": "MiniMax-M2.7",
-    "quick_think_llm": "MiniMax-M2.5",
-    "backend_url": "https://api.minimaxi.com/v1",
-    "temperature": 0.1,                 # Lower = more deterministic, better instruction following
-    # Provider-specific thinking configuration
-    "google_thinking_level": None,      # "high", "minimal", etc.
-    "openai_reasoning_effort": None,    # "medium", "high", "low"
-    # Debate and discussion settings
-    "max_debate_rounds": 2,                   # Bull vs Bear debate rounds (more rounds = deeper analysis)
-    "max_risk_discuss_rounds": 2,             # Risk debate rounds (Aggressive/Conservative/Neutral)
+
+    # ── LLM Provider Settings (from llm_models.json) ───────────────
+    "llm_provider": _llm_defaults.get("provider", "minimax"),
+    "deep_think_llm": _llm_defaults.get("deep_think_llm", "MiniMax-M2.7"),
+    "quick_think_llm": _llm_defaults.get("quick_think_llm", "MiniMax-M2.5"),
+    "temperature": _llm_defaults.get("temperature", 0.1),
+    "backend_url": None,
+
+    # Provider-specific thinking/reasoning settings
+    "enable_thinking": _llm_defaults.get("enable_thinking", False),
+    "max_thinking_tokens": _llm_defaults.get("max_thinking_tokens"),  # Limit reasoning output length
+    "openai_reasoning_effort": _llm_defaults.get("openai_reasoning_effort"),
+    "google_thinking_level": _llm_defaults.get("google_thinking_level"),
+
+    # ── Debate and Discussion Settings ─────────────────────────────
+    "max_debate_rounds": 2,
+    "max_risk_discuss_rounds": 2,
     "max_recur_limit": 100,
-    # Data vendor configuration
-    # Category-level configuration (default for all tools in category)
+
+    # ── Data Vendor Configuration ──────────────────────────────────
     "data_vendors": {
-        "core_stock_apis": "tushare,akshare",          # tushare primary (stable API), akshare fallback
-        "technical_indicators": "tushare,akshare",      # tushare primary, akshare fallback
-        "fundamental_data": "tushare,akshare",          # tushare primary (requires 2000积分), akshare fallback
-        "news_data": "tushare,akshare",                  # tushare primary (supports date filtering), akshare fallback
-        "ashare_market_indicators": "akshare",           # A-share specific: northbound flow, margin, etc.
-        "industry_classification": "akshare",            # Industry classification and peer comparison
+        "core_stock_apis": "tushare,akshare",
+        "technical_indicators": "tushare,akshare",
+        "fundamental_data": "tushare,akshare",
+        "news_data": "tushare,akshare",
+        "ashare_market_indicators": "akshare",
+        "industry_classification": "akshare",
     },
-    # Tool-level configuration (takes precedence over category-level)
-    "tool_vendors": {
-        # Example: "get_stock_data": "alpha_vantage",  # Override category default
-    },
+    "tool_vendors": {},
 }

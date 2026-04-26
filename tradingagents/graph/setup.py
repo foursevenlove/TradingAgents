@@ -126,7 +126,7 @@ class GraphSetup:
         workflow.add_node("Conservative Analyst", conservative_analyst)
         workflow.add_node("Risk Judge", risk_manager_node)
 
-        # Define edges
+        # Define edges - SEQUENTIAL execution (stable)
         # Start with the first analyst
         first_analyst = selected_analysts[0]
         workflow.add_edge(START, f"{first_analyst.capitalize()} Analyst")
@@ -152,7 +152,7 @@ class GraphSetup:
             else:
                 workflow.add_edge(current_clear, "Bull Researcher")
 
-        # Add remaining edges
+        # Add remaining edges (debate and risk)
         workflow.add_conditional_edges(
             "Bull Researcher",
             self.conditional_logic.should_continue_debate,

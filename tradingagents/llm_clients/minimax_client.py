@@ -4,7 +4,7 @@ from typing import Any, Optional
 from langchain_openai import ChatOpenAI
 
 from .base_client import BaseLLMClient
-from .validators import validate_model
+from .validators import validate_model, get_provider_config
 
 
 class MiniMaxClient(BaseLLMClient):
@@ -13,9 +13,7 @@ class MiniMaxClient(BaseLLMClient):
     MiniMax provides OpenAI-compatible API, so we use ChatOpenAI
     with custom base_url and api_key configuration.
 
-    Supported models:
-    - MiniMax-M2.7 (deep reasoning model)
-    - MiniMax-M2.5 (fast reasoning model)
+    Configuration is loaded from llm_models.json - edit that file to add/remove models.
     """
 
     def __init__(
@@ -30,15 +28,18 @@ class MiniMaxClient(BaseLLMClient):
         """Return configured ChatOpenAI instance for MiniMax."""
         llm_kwargs = {"model": self.model}
 
-        # Set MiniMax API endpoint (OpenAI-compatible)
-        # Official endpoint: https://api.minimaxi.com/v1
+        # Load config from llm_models.json
+        config = get_provider_config("minimax")
+
+        # Set API endpoint (use config default if not overridden)
         if self.base_url:
             llm_kwargs["base_url"] = self.base_url
         else:
-            llm_kwargs["base_url"] = "https://api.minimaxi.com/v1"
+            llm_kwargs["base_url"] = config.get("default_base_url", "https://api.minimaxi.com/v1")
 
         # Get API key from environment
-        api_key = os.environ.get("MINIMAX_API_KEY")
+        api_key_env = config.get("api_key_env", "MINIMAX_API_KEY")
+        api_key = os.environ.get(api_key_env)
         if api_key:
             llm_kwargs["api_key"] = api_key
 

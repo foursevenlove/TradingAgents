@@ -56,6 +56,7 @@ class AnalyzeRequest(BaseModel):
 class TaskSummary(BaseModel):
     task_id: str
     ticker: str
+    stock_name: Optional[str] = None
     trade_date: str
     status: TaskStatus
     created_at: datetime
@@ -67,6 +68,7 @@ class TaskSummary(BaseModel):
 class TaskDetail(BaseModel):
     task_id: str
     ticker: str
+    stock_name: Optional[str] = None
     trade_date: str
     status: TaskStatus
     created_at: datetime

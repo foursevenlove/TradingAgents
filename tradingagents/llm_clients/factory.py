@@ -5,6 +5,7 @@ from .openai_client import OpenAIClient
 from .anthropic_client import AnthropicClient
 from .google_client import GoogleClient
 from .minimax_client import MiniMaxClient
+from .alibaba_client import AlibabaClient
 
 
 def create_llm_client(
@@ -16,7 +17,7 @@ def create_llm_client(
     """Create an LLM client for the specified provider.
 
     Args:
-        provider: LLM provider (openai, anthropic, google, xai, ollama, openrouter, minimax)
+        provider: LLM provider (openai, anthropic, google, xai, ollama, openrouter, minimax, alibaba)
         model: Model name/identifier
         base_url: Optional base URL for API endpoint
         **kwargs: Additional provider-specific arguments
@@ -49,5 +50,8 @@ def create_llm_client(
 
     if provider_lower == "minimax":
         return MiniMaxClient(model, base_url, **kwargs)
+
+    if provider_lower in ("alibaba", "bailian", "dashscope"):
+        return AlibabaClient(model, base_url, **kwargs)
 
     raise ValueError(f"Unsupported LLM provider: {provider}")

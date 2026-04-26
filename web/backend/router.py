@@ -64,6 +64,7 @@ async def analyze_status(task_id: str):
     return {
         "task_id": task["task_id"],
         "ticker": task["ticker"],
+        "stock_name": task.get("stock_name"),
         "trade_date": task["trade_date"],
         "status": task["status"],
         "created_at": task["created_at"],

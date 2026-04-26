@@ -34,11 +34,23 @@ from tradingagents.agents.utils.industry_tools import (
 
 def create_msg_delete():
     def delete_messages(state):
-        """Clear messages and add placeholder for Anthropic compatibility"""
-        messages = state["messages"]
+        """Clear messages and add placeholder for Anthropic compatibility.
 
-        # Remove all messages
-        removal_operations = [RemoveMessage(id=m.id) for m in messages]
+        Only removes AI and Human messages to avoid ToolMessage ID conflicts.
+        ToolMessages are handled separately by LangGraph's tool nodes.
+        """
+        messages = state.get("messages", [])
+
+        # Only remove messages that have a valid id and are not ToolMessages
+        # ToolMessages may have been processed by tool nodes and could cause ID conflicts
+        removal_operations = []
+        for m in messages:
+            # Check if message has an id attribute and is not a ToolMessage
+            if hasattr(m, "id") and m.id:
+                msg_type = type(m).__name__
+                # Skip ToolMessage as it may have been processed elsewhere
+                if msg_type != "ToolMessage":
+                    removal_operations.append(RemoveMessage(id=m.id))
 
         # Add a minimal placeholder message
         placeholder = HumanMessage(content="Continue")

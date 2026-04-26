@@ -9,6 +9,7 @@ from threading import Lock
 
 from .models import TaskStatus, TaskSummary, TaskDetail
 from .config import WEB_CONFIG
+from .stock_service import get_stock_name
 
 
 class TaskManager:
@@ -28,6 +29,7 @@ class TaskManager:
                 CREATE TABLE IF NOT EXISTS tasks (
                     task_id TEXT PRIMARY KEY,
                     ticker TEXT NOT NULL,
+                    stock_name TEXT,
                     trade_date TEXT NOT NULL,
                     status TEXT NOT NULL,
                     created_at TEXT NOT NULL,
@@ -57,14 +59,22 @@ class TaskManager:
                 conn.execute("ALTER TABLE tasks ADD COLUMN batch_id TEXT")
             except sqlite3.OperationalError:
                 pass
+            # Add stock_name column if not exists (for older DBs)
+            try:
+                conn.execute("ALTER TABLE tasks ADD COLUMN stock_name TEXT")
+            except sqlite3.OperationalError:
+                pass
             conn.commit()
 
     def create_task(self, ticker: str, trade_date: str, config: dict) -> str:
         task_id = str(uuid.uuid4())
         now = datetime.utcnow().isoformat() + "Z"
+        # Get stock name
+        stock_name = get_stock_name(ticker)
         task = {
             "task_id": task_id,
             "ticker": ticker,
+            "stock_name": stock_name,
             "trade_date": trade_date,
             "status": TaskStatus.PENDING.value,
             "created_at": now,
@@ -78,8 +88,11 @@ class TaskManager:
         self._locks[task_id] = Lock()
 
         with sqlite3.connect(self._db_path) as conn:
+            # Use explicit column names to match actual table order
             conn.execute(
-                "INSERT INTO tasks VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                """INSERT INTO tasks
+                   (task_id, ticker, trade_date, status, created_at, completed_at, error, signal, result, config, batch_id, stock_name)
+                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
                 (
                     task_id,
                     ticker,
@@ -92,6 +105,7 @@ class TaskManager:
                     None,
                     json.dumps(config, ensure_ascii=False),
                     None,  # batch_id
+                    stock_name,
                 ),
             )
             conn.commit()
@@ -186,6 +200,7 @@ class TaskManager:
         return TaskDetail(
             task_id=row["task_id"],
             ticker=row["ticker"],
+            stock_name=row["stock_name"] if "stock_name" in row.keys() else None,
             trade_date=row["trade_date"],
             status=TaskStatus(row["status"]),
             created_at=datetime.fromisoformat(row["created_at"]),
@@ -208,7 +223,7 @@ class TaskManager:
             conn.row_factory = sqlite3.Row
             rows = conn.execute(
                 """
-                SELECT task_id, ticker, trade_date, status, created_at, completed_at, error, signal
+                SELECT task_id, ticker, stock_name, trade_date, status, created_at, completed_at, error, signal
                 FROM tasks
                 ORDER BY created_at DESC
                 LIMIT ? OFFSET ?
@@ -220,10 +235,11 @@ class TaskManager:
             TaskSummary(
                 task_id=r["task_id"],
                 ticker=r["ticker"],
+                stock_name=r["stock_name"] if "stock_name" in r.keys() else None,
                 trade_date=r["trade_date"],
                 status=TaskStatus(r["status"]),
-                created_at=datetime.fromisoformat(r["created_at"]),
-                completed_at=datetime.fromisoformat(r["completed_at"]) if r["completed_at"] else None,
+                created_at=datetime.fromisoformat(r["created_at"]) if r["created_at"] and r["created_at"].startswith("202") else datetime.utcnow(),
+                completed_at=datetime.fromisoformat(r["completed_at"]) if r["completed_at"] and r["completed_at"].startswith("202") else None,
                 error=r["error"],
                 signal=r["signal"],
             )

@@ -1,0 +1,107 @@
+{
+  "default_settings": {
+    "provider": "alibaba",
+    "deep_think_llm": "deepseek-v4-flash",
+    "quick_think_llm": "deepseek-v4-flash",
+    "temperature": 0.1,
+    "enable_thinking": true,
+    "max_thinking_tokens": 8192,
+    "openai_reasoning_effort": null,
+    "google_thinking_level": null
+  },
+  "providers": {
+    "openai": {
+      "description": "OpenAI GPT series",
+      "api_key_env": "OPENAI_API_KEY",
+      "default_base_url": "https://api.openai.com/v1",
+      "models": [
+        {"name": "gpt-5.4-pro", "description": "GPT-5.4 Pro (most capable)"},
+        {"name": "gpt-5.4", "description": "GPT-5.4"},
+        {"name": "gpt-5.2", "description": "GPT-5.2"},
+        {"name": "gpt-5.1", "description": "GPT-5.1"},
+        {"name": "gpt-5", "description": "GPT-5 base"},
+        {"name": "gpt-5-mini", "description": "GPT-5 Mini (fast)"},
+        {"name": "gpt-5-nano", "description": "GPT-5 Nano (fastest)"},
+        {"name": "gpt-4.1", "description": "GPT-4.1"},
+        {"name": "gpt-4.1-mini", "description": "GPT-4.1 Mini"},
+        {"name": "gpt-4.1-nano", "description": "GPT-4.1 Nano"}
+      ]
+    },
+    "anthropic": {
+      "description": "Anthropic Claude series",
+      "api_key_env": "ANTHROPIC_API_KEY",
+      "default_base_url": null,
+      "models": [
+        {"name": "claude-opus-4-6", "description": "Claude Opus 4.6 (most capable)"},
+        {"name": "claude-sonnet-4-6", "description": "Claude Sonnet 4.6"},
+        {"name": "claude-opus-4-5", "description": "Claude Opus 4.5"},
+        {"name": "claude-sonnet-4-5", "description": "Claude Sonnet 4.5"},
+        {"name": "claude-haiku-4-5", "description": "Claude Haiku 4.5 (fastest)"}
+      ]
+    },
+    "google": {
+      "description": "Google Gemini series",
+      "api_key_env": "GOOGLE_API_KEY",
+      "default_base_url": null,
+      "models": [
+        {"name": "gemini-2.5-pro", "description": "Gemini 2.5 Pro"},
+        {"name": "gemini-2.5-flash", "description": "Gemini 2.5 Flash"},
+        {"name": "gemini-2.5-flash-lite", "description": "Gemini 2.5 Flash Lite"}
+      ]
+    },
+    "xai": {
+      "description": "xAI Grok series",
+      "api_key_env": "XAI_API_KEY",
+      "default_base_url": "https://api.x.ai/v1",
+      "models": [
+        {"name": "grok-4-1-fast-reasoning", "description": "Grok 4.1 Fast Reasoning"},
+        {"name": "grok-4-1-fast-non-reasoning", "description": "Grok 4.1 Fast Non-Reasoning"},
+        {"name": "grok-4-fast-reasoning", "description": "Grok 4 Fast Reasoning"},
+        {"name": "grok-4-fast-non-reasoning", "description": "Grok 4 Fast Non-Reasoning"}
+      ]
+    },
+    "minimax": {
+      "description": "MiniMax M2 series",
+      "api_key_env": "MINIMAX_API_KEY",
+      "default_base_url": "https://api.minimaxi.com/v1",
+      "models": [
+        {"name": "MiniMax-M2.7", "description": "M2.7 (deep reasoning)"},
+        {"name": "MiniMax-M2.7-highspeed", "description": "M2.7 Highspeed"},
+        {"name": "MiniMax-M2.5", "description": "M2.5 (cost-effective)"},
+        {"name": "MiniMax-M2.5-highspeed", "description": "M2.5 Highspeed"},
+        {"name": "MiniMax-M2.1", "description": "M2.1 (programming)"},
+        {"name": "MiniMax-M2", "description": "M2 (agent workflow)"}
+      ]
+    },
+    "alibaba": {
+      "description": "Alibaba Cloud Bailian (DashScope) Qwen series",
+      "api_key_env": "DASHSCOPE_API_KEY",
+      "default_base_url": "https://dashscope.aliyuncs.com/compatible-mode/v1",
+      "aliases": ["bailian", "dashscope"],
+      "models": [
+        {"name": "deepseek-r1", "description": "DeepSeek R1 (deep reasoning)"},
+        {"name": "deepseek-v3.2", "description": "DeepSeek V3.2 (balanced)"},
+        {"name": "qwen-max", "description": "Qwen Max (deep reasoning)"},
+        {"name": "qwen-max-longcontext", "description": "Qwen Max Long Context"},
+        {"name": "qwen-plus", "description": "Qwen Plus (balanced)"},
+        {"name": "qwen-turbo", "description": "Qwen Turbo (fast)"},
+        {"name": "qwen2.5-72b-instruct", "description": "Qwen2.5 72B"},
+        {"name": "qwen2.5-32b-instruct", "description": "Qwen2.5 32B"},
+        {"name": "qwen2.5-14b-instruct", "description": "Qwen2.5 14B"},
+        {"name": "qwen2.5-7b-instruct", "description": "Qwen2.5 7B"}
+      ]
+    },
+    "ollama": {
+      "description": "Ollama local models",
+      "api_key_env": null,
+      "default_base_url": "http://localhost:11434/v1",
+      "models": []
+    },
+    "openrouter": {
+      "description": "OpenRouter multi-provider gateway",
+      "api_key_env": "OPENROUTER_API_KEY",
+      "default_base_url": "https://openrouter.ai/api/v1",
+      "models": []
+    }
+  }
+}

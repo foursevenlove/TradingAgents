@@ -165,6 +165,15 @@ class TradingAgentsGraph:
             if reasoning_effort:
                 kwargs["reasoning_effort"] = reasoning_effort
 
+        elif provider in ("alibaba", "bailian", "dashscope"):
+            enable_thinking = self.config.get("enable_thinking")
+            if enable_thinking:
+                kwargs["enable_thinking"] = True
+                # Limit thinking tokens to prevent 28MB string overflow
+                max_thinking_tokens = self.config.get("max_thinking_tokens")
+                if max_thinking_tokens:
+                    kwargs["max_thinking_tokens"] = max_thinking_tokens
+
         return kwargs
 
     def _create_tool_nodes(self) -> Dict[str, ToolNode]:

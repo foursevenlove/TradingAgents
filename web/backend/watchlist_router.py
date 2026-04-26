@@ -1,11 +1,12 @@
 """API routes for watchlist, schedule, and batch analysis."""
-from typing import Optional
+from typing import Optional, List
 
 from fastapi import APIRouter, HTTPException, Query
 from pydantic import BaseModel, Field
 
 from .watchlist_manager import WatchlistManager
 from .scheduler_service import get_scheduler, create_scheduler
+from .stock_service import search_stocks
 
 router = APIRouter()
 
@@ -28,6 +29,12 @@ def init_watchlist_manager() -> WatchlistManager:
 
 
 # ── Request/Response Models ──────────────────────────────────────────
+
+class StockSearchResult(BaseModel):
+    ticker: str
+    code: str
+    name: str
+
 
 class AddStockRequest(BaseModel):
     ticker: str = Field(..., description="股票代码，如 600000.SH")
@@ -71,6 +78,16 @@ class BatchRunDetail(BatchRunSummary):
 
 
 # ── Watchlist Routes ────────────────────────────────────────────────
+
+@router.get("/api/stocks/search", response_model=List[StockSearchResult])
+async def search_stocks_api(
+    query: str = Query(..., description="搜索关键词（代码或名称）"),
+    limit: int = Query(20, ge=1, le=100, description="返回数量限制"),
+):
+    """Search stocks by code or name."""
+    results = search_stocks(query, limit)
+    return [StockSearchResult(**r) for r in results]
+
 
 @router.get("/api/watchlist", response_model=list)
 async def list_watchlist(enabled_only: bool = Query(False)):
