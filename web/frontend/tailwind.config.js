@@ -22,8 +22,18 @@ export default {
           500: '#ef4444',
           600: '#dc2626',
         },
+        cyan: {
+          50: '#ecfeff',
+          100: '#cffafe',
+          200: '#a5f3fc',
+          500: '#06b6d4',
+          600: '#0891b2',
+          700: '#0e7490',
+        },
       },
     },
   },
-  plugins: [],
+  plugins: [
+    require('@tailwindcss/typography'),
+  ],
 }

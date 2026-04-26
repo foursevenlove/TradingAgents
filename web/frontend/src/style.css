@@ -18,4 +18,74 @@
   .card {
     @apply bg-white rounded-xl shadow-sm border border-gray-200 p-5;
   }
+
+  /* Report card styles */
+  .report-card {
+    @apply bg-white rounded-2xl shadow-md border border-gray-100 p-6 transition-shadow hover:shadow-lg;
+  }
+
+  .report-card-colored {
+    @apply rounded-2xl shadow-md p-6 transition-shadow hover:shadow-lg;
+  }
+
+  .report-section-title {
+    @apply text-lg font-bold text-gray-900 mb-4 flex items-center gap-3;
+  }
+
+  .report-divider {
+    @apply border-t border-gray-200 my-8;
+  }
+
+  /* Prose customization for markdown */
+  .prose-custom {
+    @apply text-gray-600 leading-relaxed;
+  }
+
+  .prose-custom h1 {
+    @apply text-xl font-bold text-gray-900 mt-4 mb-2;
+  }
+
+  .prose-custom h2 {
+    @apply text-lg font-semibold text-gray-800 mt-3 mb-2;
+  }
+
+  .prose-custom h3 {
+    @apply text-base font-semibold text-gray-700 mt-2 mb-1;
+  }
+
+  .prose-custom p {
+    @apply mb-3;
+  }
+
+  .prose-custom ul {
+    @apply list-disc list-inside mb-3 space-y-1;
+  }
+
+  .prose-custom ol {
+    @apply list-decimal list-inside mb-3 space-y-1;
+  }
+
+  .prose-custom li {
+    @apply text-gray-600;
+  }
+
+  .prose-custom table {
+    @apply w-full border-collapse mb-4;
+  }
+
+  .prose-custom th {
+    @apply bg-gray-50 text-left px-3 py-2 font-semibold text-gray-700 border-b border-gray-200;
+  }
+
+  .prose-custom td {
+    @apply px-3 py-2 border-b border-gray-100 text-gray-600;
+  }
+
+  .prose-custom strong {
+    @apply font-semibold text-gray-800;
+  }
+
+  .prose-custom blockquote {
+    @apply border-l-4 border-gray-300 pl-4 italic text-gray-500 my-3;
+  }
 }

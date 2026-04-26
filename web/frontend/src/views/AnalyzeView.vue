@@ -78,22 +78,25 @@
     </div>
 
     <!-- Report View (for completed tasks) -->
-    <div v-if="viewMode === 'report' && isCompleted" class="space-y-6">
-      <!-- Signal Card -->
-      <div class="bg-white rounded-xl border border-gray-200 p-6">
+    <div v-if="viewMode === 'report' && isCompleted" class="space-y-8">
+      <!-- Signal Card - Hero Section -->
+      <div class="report-card bg-gradient-to-r from-gray-50 to-white">
         <div class="flex items-center justify-between">
           <div>
-            <h2 class="text-lg font-bold text-gray-900">最终决策</h2>
+            <div class="flex items-center gap-2 mb-2">
+              <span class="text-2xl">📊</span>
+              <h2 class="text-xl font-bold text-gray-900">{{ stockName || ticker }}</h2>
+            </div>
             <p class="text-sm text-gray-500">
-              <span v-if="stockName" class="font-medium">{{ stockName }}</span>
-              <span v-if="stockName && ticker" class="text-gray-400"> · </span>
-              <span class="text-gray-400">{{ ticker }}</span>
-              <span class="text-gray-400"> · </span>
-              <span>{{ tradeDate }}</span>
+              <span class="inline-flex items-center gap-1">
+                <span class="font-medium text-gray-700">{{ ticker }}</span>
+                <span class="text-gray-400">|</span>
+                <span>{{ tradeDate }}</span>
+              </span>
             </p>
           </div>
           <div
-            class="px-4 py-2 rounded-lg font-bold text-lg"
+            class="px-6 py-3 rounded-xl font-bold text-xl shadow-md transform transition-transform hover:scale-105"
             :class="signalClass"
           >
             {{ signal || 'UNKNOWN' }}
@@ -101,37 +104,169 @@
         </div>
       </div>
 
-      <!-- Reports Summary -->
-      <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
-        <div v-if="result?.market_report" class="card">
-          <h3 class="text-sm font-semibold text-gray-700 mb-2">市场分析报告</h3>
-          <div class="text-sm text-gray-600 whitespace-pre-wrap max-h-40 overflow-y-auto">{{ result.market_report }}</div>
+      <!-- Section: 决策结论 -->
+      <section v-if="result?.final_trade_decision">
+        <h2 class="report-section-title">
+          <span class="w-8 h-8 rounded-lg bg-primary-100 flex items-center justify-center">
+            <span class="text-primary-600">✓</span>
+          </span>
+          决策结论
+        </h2>
+        <div class="report-card-colored border-2 border-primary-200 bg-gradient-to-br from-primary-50 to-white">
+          <div class="prose-custom prose max-w-none" v-html="renderMd(result.final_trade_decision)"></div>
         </div>
-        <div v-if="result?.news_report" class="card">
-          <h3 class="text-sm font-semibold text-gray-700 mb-2">新闻分析报告</h3>
-          <div class="text-sm text-gray-600 whitespace-pre-wrap max-h-40 overflow-y-auto">{{ result.news_report }}</div>
-        </div>
-        <div v-if="result?.fundamentals_report" class="card">
-          <h3 class="text-sm font-semibold text-gray-700 mb-2">基本面分析报告</h3>
-          <div class="text-sm text-gray-600 whitespace-pre-wrap max-h-40 overflow-y-auto">{{ result.fundamentals_report }}</div>
-        </div>
-        <div v-if="result?.sentiment_report" class="card">
-          <h3 class="text-sm font-semibold text-gray-700 mb-2">情绪分析报告</h3>
-          <div class="text-sm text-gray-600 whitespace-pre-wrap max-h-40 overflow-y-auto">{{ result.sentiment_report }}</div>
-        </div>
-      </div>
+      </section>
 
-      <!-- Trader Plan -->
-      <div v-if="result?.trader_investment_plan" class="card">
-        <h3 class="text-sm font-semibold text-gray-700 mb-2">交易员投资计划</h3>
-        <div class="text-sm text-gray-600 whitespace-pre-wrap">{{ result.trader_investment_plan }}</div>
-      </div>
+      <!-- Section: 因子评分 -->
+      <section v-if="result">
+        <h2 class="report-section-title">
+          <span class="w-8 h-8 rounded-lg bg-indigo-100 flex items-center justify-center">
+            <span class="text-indigo-600">📈</span>
+          </span>
+          因子评分
+        </h2>
+        <FactorScore :result="result" />
+      </section>
 
-      <!-- Final Decision -->
-      <div v-if="result?.final_trade_decision" class="card">
-        <h3 class="text-sm font-semibold text-gray-700 mb-2">最终交易决策</h3>
-        <div class="text-sm text-gray-600 whitespace-pre-wrap">{{ result.final_trade_decision }}</div>
-      </div>
+      <hr class="report-divider" />
+
+      <!-- Section: 分析师报告 -->
+      <section>
+        <h2 class="report-section-title">
+          <span class="w-8 h-8 rounded-lg bg-blue-100 flex items-center justify-center">
+            <span class="text-blue-600">🔍</span>
+          </span>
+          分析师报告
+        </h2>
+        <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
+          <div v-if="result?.market_report" class="report-card">
+            <h3 class="flex items-center gap-2 text-sm font-semibold text-blue-700 mb-4 pb-2 border-b border-blue-100">
+              <span class="w-6 h-6 rounded-full bg-blue-500 flex items-center justify-center text-white text-xs">📊</span>
+              市场分析师
+            </h3>
+            <div class="prose-custom prose prose-sm max-w-none max-h-72 overflow-y-auto pr-2" v-html="renderMd(result.market_report)"></div>
+          </div>
+          <div v-if="result?.news_report" class="report-card">
+            <h3 class="flex items-center gap-2 text-sm font-semibold text-orange-700 mb-4 pb-2 border-b border-orange-100">
+              <span class="w-6 h-6 rounded-full bg-orange-500 flex items-center justify-center text-white text-xs">📰</span>
+              新闻分析师
+            </h3>
+            <div class="prose-custom prose prose-sm max-w-none max-h-72 overflow-y-auto pr-2" v-html="renderMd(result.news_report)"></div>
+          </div>
+          <div v-if="result?.fundamentals_report" class="report-card">
+            <h3 class="flex items-center gap-2 text-sm font-semibold text-green-700 mb-4 pb-2 border-b border-green-100">
+              <span class="w-6 h-6 rounded-full bg-green-500 flex items-center justify-center text-white text-xs">💰</span>
+              基本面分析师
+            </h3>
+            <div class="prose-custom prose prose-sm max-w-none max-h-72 overflow-y-auto pr-2" v-html="renderMd(result.fundamentals_report)"></div>
+          </div>
+          <div v-if="result?.sentiment_report" class="report-card">
+            <h3 class="flex items-center gap-2 text-sm font-semibold text-purple-700 mb-4 pb-2 border-b border-purple-100">
+              <span class="w-6 h-6 rounded-full bg-purple-500 flex items-center justify-center text-white text-xs">💬</span>
+              社交媒体分析师
+            </h3>
+            <div class="prose-custom prose prose-sm max-w-none max-h-72 overflow-y-auto pr-2" v-html="renderMd(result.sentiment_report)"></div>
+          </div>
+        </div>
+      </section>
+
+      <hr class="report-divider" />
+
+      <!-- Section: 多空辩论 -->
+      <section v-if="result?.investment_debate_state">
+        <h2 class="report-section-title">
+          <span class="w-8 h-8 rounded-lg bg-green-100 flex items-center justify-center">
+            <span class="text-green-600">⚖️</span>
+          </span>
+          多空辩论
+        </h2>
+        <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
+          <div v-if="result.investment_debate_state.bull_history" class="report-card-colored border-2 border-green-200 bg-gradient-to-br from-green-50 to-white">
+            <h3 class="flex items-center gap-2 text-sm font-semibold text-green-700 mb-4 pb-2 border-b border-green-100">
+              <span class="w-6 h-6 rounded-full bg-green-500 flex items-center justify-center text-white text-xs">🐂</span>
+              多方研究员
+            </h3>
+            <div class="prose-custom prose prose-sm max-w-none max-h-72 overflow-y-auto pr-2" v-html="renderMd(result.investment_debate_state.bull_history)"></div>
+          </div>
+          <div v-if="result.investment_debate_state.bear_history" class="report-card-colored border-2 border-red-200 bg-gradient-to-br from-red-50 to-white">
+            <h3 class="flex items-center gap-2 text-sm font-semibold text-red-700 mb-4 pb-2 border-b border-red-100">
+              <span class="w-6 h-6 rounded-full bg-red-500 flex items-center justify-center text-white text-xs">🐻</span>
+              空方研究员
+            </h3>
+            <div class="prose-custom prose prose-sm max-w-none max-h-72 overflow-y-auto pr-2" v-html="renderMd(result.investment_debate_state.bear_history)"></div>
+          </div>
+        </div>
+      </section>
+
+      <!-- Section: 研究经理 -->
+      <section v-if="result?.investment_plan">
+        <div class="report-card-colored border-2 border-indigo-200 bg-gradient-to-br from-indigo-50 to-white">
+          <h3 class="flex items-center gap-2 text-sm font-semibold text-indigo-700 mb-4 pb-2 border-b border-indigo-100">
+            <span class="w-6 h-6 rounded-full bg-indigo-500 flex items-center justify-center text-white text-xs">👨‍💼</span>
+            研究经理投资计划
+          </h3>
+          <div class="prose-custom prose prose-sm max-w-none" v-html="renderMd(result.investment_plan)"></div>
+        </div>
+      </section>
+
+      <!-- Section: 交易员 -->
+      <section v-if="result?.trader_investment_plan">
+        <div class="report-card-colored border-2 border-cyan-200 bg-gradient-to-br from-cyan-50 to-white">
+          <h3 class="flex items-center gap-2 text-sm font-semibold text-cyan-700 mb-4 pb-2 border-b border-cyan-100">
+            <span class="w-6 h-6 rounded-full bg-cyan-500 flex items-center justify-center text-white text-xs">💹</span>
+            交易员投资计划
+          </h3>
+          <div class="prose-custom prose prose-sm max-w-none" v-html="renderMd(result.trader_investment_plan)"></div>
+        </div>
+      </section>
+
+      <hr class="report-divider" />
+
+      <!-- Section: 风控辩论 -->
+      <section v-if="result?.risk_debate_state">
+        <h2 class="report-section-title">
+          <span class="w-8 h-8 rounded-lg bg-amber-100 flex items-center justify-center">
+            <span class="text-amber-600">🛡️</span>
+          </span>
+          风控辩论
+        </h2>
+        <div class="grid grid-cols-1 md:grid-cols-3 gap-6">
+          <div v-if="result.risk_debate_state.aggressive_history" class="report-card-colored border-2 border-orange-200 bg-gradient-to-br from-orange-50 to-white">
+            <h3 class="flex items-center gap-2 text-sm font-semibold text-orange-700 mb-4 pb-2 border-b border-orange-100">
+              <span class="w-6 h-6 rounded-full bg-orange-500 flex items-center justify-center text-white text-xs">🔥</span>
+              激进风控
+            </h3>
+            <div class="prose-custom prose prose-sm max-w-none max-h-72 overflow-y-auto pr-2" v-html="renderMd(result.risk_debate_state.aggressive_history)"></div>
+          </div>
+          <div v-if="result.risk_debate_state.conservative_history" class="report-card-colored border-2 border-blue-200 bg-gradient-to-br from-blue-50 to-white">
+            <h3 class="flex items-center gap-2 text-sm font-semibold text-blue-700 mb-4 pb-2 border-b border-blue-100">
+              <span class="w-6 h-6 rounded-full bg-blue-500 flex items-center justify-center text-white text-xs">🧊</span>
+              保守风控
+            </h3>
+            <div class="prose-custom prose prose-sm max-w-none max-h-72 overflow-y-auto pr-2" v-html="renderMd(result.risk_debate_state.conservative_history)"></div>
+          </div>
+          <div v-if="result.risk_debate_state.neutral_history" class="report-card-colored border-2 border-gray-200 bg-gradient-to-br from-gray-50 to-white">
+            <h3 class="flex items-center gap-2 text-sm font-semibold text-gray-700 mb-4 pb-2 border-b border-gray-100">
+              <span class="w-6 h-6 rounded-full bg-gray-500 flex items-center justify-center text-white text-xs">⚖️</span>
+              中性风控
+            </h3>
+            <div class="prose-custom prose prose-sm max-w-none max-h-72 overflow-y-auto pr-2" v-html="renderMd(result.risk_debate_state.neutral_history)"></div>
+          </div>
+        </div>
+      </section>
+
+      <hr class="report-divider" />
+
+      <!-- Section: K线图表 -->
+      <section>
+        <h2 class="report-section-title">
+          <span class="w-8 h-8 rounded-lg bg-purple-100 flex items-center justify-center">
+            <span class="text-purple-600">📉</span>
+          </span>
+          K线图表
+        </h2>
+        <DataChart :ticker="ticker" :trade-date="tradeDate" />
+      </section>
     </div>
   </div>
 </template>
@@ -139,12 +274,22 @@
 <script setup>
 import { ref, computed, onMounted, onUnmounted } from 'vue'
 import { useRouter } from 'vue-router'
+import { marked } from 'marked'
 import AgentPipeline from '../components/AgentPipeline.vue'
 import AgentOutput from '../components/AgentOutput.vue'
 import ToolCallPanel from '../components/ToolCallPanel.vue'
 import DebateView from '../components/DebateView.vue'
+import DecisionCard from '../components/DecisionCard.vue'
+import FactorScore from '../components/FactorScore.vue'
+import DataChart from '../components/DataChart.vue'
 import { api } from '../api.js'
 import { taskStore } from '../stores/taskStore.js'
+
+function renderMd(text) {
+  if (!text) return ''
+  const cleaned = text.replace(/<tool_call>[\s\S]*?<\/think>/gi, '').trim()
+  return marked.parse(cleaned)
+}
 
 const props = defineProps({
   taskId: String,

@@ -118,7 +118,7 @@ function formatTime(iso) {
 }
 
 function goToReport(taskId) {
-  router.push(`/report/${taskId}`)
+  router.push(`/analyze/${taskId}`)
 }
 
 async function reanalyze(ticker, tradeDate) {
