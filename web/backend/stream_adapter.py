@@ -519,8 +519,26 @@ class AnalysisRunner:
         })
 
     def _extract_last_line(self, text: str) -> str:
-        lines = [l.strip() for l in text.split("\n") if l.strip()]
-        return lines[-1] if lines else ""
+        """Extract the most recent complete speech from debate history.
+
+        History format: each speech starts with "看涨分析师：" or "看跌分析师：" etc.
+        Returns the last complete speech (from the last marker to end).
+        """
+        if not text:
+            return ""
+        # Find the last occurrence of any speech marker
+        markers = ["看涨分析师：", "看跌分析师：", "激进风控：", "保守风控：", "中性风控："]
+        last_marker_pos = -1
+        for marker in markers:
+            pos = text.rfind(marker)
+            if pos > last_marker_pos:
+                last_marker_pos = pos
+
+        if last_marker_pos >= 0:
+            return text[last_marker_pos:].strip()
+        # Fallback: return last non-empty paragraph
+        paragraphs = [p.strip() for p in text.split("\n\n") if p.strip()]
+        return paragraphs[-1] if paragraphs else ""
 
     async def _emit(self, event_type: EventType, data: Dict[str, Any]):
         event = SSEEvent(type=event_type, task_id=self.task_id, data=data)

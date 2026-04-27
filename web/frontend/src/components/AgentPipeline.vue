@@ -1,6 +1,6 @@
 <template>
   <div class="card">
-    <h3 class="text-sm font-semibold text-gray-700 mb-4 flex items-center gap-2">
+    <h3 class="text-sm font-semibold text-gray-700 mb-3 flex items-center gap-2">
       <span class="w-2 h-2 rounded-full bg-primary-500"></span>
       Agent 执行流水线
     </h3>
@@ -9,23 +9,23 @@
         v-for="agent in agents"
         :key="agent.name"
         @click="selectAgent(agent)"
-        class="flex items-center gap-3 p-2 rounded-lg transition-colors cursor-pointer"
+        class="flex items-center gap-3 p-2 rounded-lg transition-all duration-200 cursor-pointer group"
         :class="agentClass(agent)"
       >
-        <div class="w-6 h-6 rounded-full flex items-center justify-center text-xs font-bold shrink-0"
+        <div class="w-7 h-7 rounded-full flex items-center justify-center text-sm shrink-0 shadow-sm"
           :class="iconClass(agent)"
         >
           <template v-if="agent.status === 'completed'">&#10003;</template>
           <template v-else-if="agent.status === 'running'">
-            <span class="w-3 h-3 border-2 border-white border-t-transparent rounded-full animate-spin"></span>
+            <span class="w-3.5 h-3.5 border-2 border-white border-t-transparent rounded-full animate-spin"></span>
           </template>
-          <template v-else>{{ agent.name[0] }}</template>
+          <template v-else>{{ emojiMap[agent.rawName] || agent.name[0] }}</template>
         </div>
         <div class="flex-1 min-w-0">
-          <div class="text-sm font-medium truncate">{{ agent.name }}</div>
-          <div class="text-xs text-gray-400">{{ agentStatusText(agent) }}</div>
+          <div class="text-sm font-medium truncate group-hover:text-gray-900 transition-colors">{{ agent.name }}</div>
+          <div class="text-xs" :class="agent.status === 'running' ? 'text-primary-600 font-medium' : 'text-gray-400'">{{ agentStatusText(agent) }}</div>
         </div>
-        <div v-if="isSelected(agent)" class="w-2 h-2 rounded-full bg-primary-500"></div>
+        <div v-if="isSelected(agent)" class="w-2 h-2 rounded-full bg-primary-500 shadow-sm"></div>
       </div>
     </div>
   </div>
@@ -69,6 +69,21 @@ const nameMap = {
   'Conservative Analyst': '保守风控',
   'Neutral Analyst': '中性风控',
   'Risk Judge': '风控经理',
+}
+
+const emojiMap = {
+  'Market Analyst': '📊',
+  'Social Analyst': '💬',
+  'News Analyst': '📰',
+  'Fundamentals Analyst': '💰',
+  'Bull Researcher': '🐂',
+  'Bear Researcher': '🐻',
+  'Research Manager': '👨\u200d💼',
+  'Trader': '💹',
+  'Aggressive Analyst': '🔥',
+  'Conservative Analyst': '🧊',
+  'Neutral Analyst': '⚖️',
+  'Risk Judge': '🛡️',
 }
 
 const agents = computed(() => {
@@ -140,11 +155,11 @@ function isSelected(agent) {
 }
 
 function agentClass(agent) {
-  const baseClass = 'cursor-pointer hover:shadow-sm'
-  if (isSelected(agent)) return 'bg-primary-100 border border-primary-300 ' + baseClass
-  if (agent.status === 'running') return 'bg-primary-50 border border-primary-200 ' + baseClass
-  if (agent.status === 'completed') return 'bg-green-50 border border-green-200 ' + baseClass
-  return 'bg-gray-50 border border-gray-100 ' + baseClass
+  const baseClass = 'cursor-pointer hover:shadow-md'
+  if (isSelected(agent)) return 'bg-gradient-to-r from-primary-100 to-primary-50 border-2 border-primary-400 ' + baseClass
+  if (agent.status === 'running') return 'bg-gradient-to-r from-primary-50 to-white border-2 border-primary-200 ' + baseClass
+  if (agent.status === 'completed') return 'bg-gradient-to-r from-green-50 to-white border-2 border-green-200 ' + baseClass
+  return 'bg-gray-50 border border-gray-100 hover:border-gray-200 ' + baseClass
 }
 
 function iconClass(agent) {

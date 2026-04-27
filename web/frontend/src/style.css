@@ -16,7 +16,7 @@
     @apply px-4 py-2 bg-gray-200 text-gray-800 rounded-lg hover:bg-gray-300 transition-colors font-medium;
   }
   .card {
-    @apply bg-white rounded-xl shadow-sm border border-gray-200 p-5;
+    @apply bg-white rounded-xl shadow-sm border border-gray-200 p-4;
   }
 
   /* Report card styles */

@@ -158,7 +158,17 @@ async def analyze_events(task_id: str):
             except asyncio.TimeoutError:
                 yield ":\n\n"
                 task = get_task_manager().get_task(task_id)
-                if task and task["status"] in (TaskStatus.COMPLETED.value, TaskStatus.FAILED.value, TaskStatus.CANCELLED.value):
+                if task and task["status"] == TaskStatus.COMPLETED.value:
+                    yield f"event: {EventType.COMPLETED.value}\ndata: {{\"task_id\": \"{task_id}\"}}\n\n"
+                    break
+                elif task and task["status"] == TaskStatus.FAILED.value:
+                    err = task.get("error") or "分析失败"
+                    # Escape newlines for SSE JSON
+                    err_escaped = err.replace("\\", "\\\\").replace("\"", "\\\"").replace("\n", "\\n")
+                    yield f"event: {EventType.FAILED.value}\ndata: {{\"error\": \"{err_escaped}\"}}\n\n"
+                    break
+                elif task and task["status"] == TaskStatus.CANCELLED.value:
+                    yield f"event: {EventType.FAILED.value}\ndata: {{\"error\": \"分析已取消\"}}\n\n"
                     break
 
     return StreamingResponse(

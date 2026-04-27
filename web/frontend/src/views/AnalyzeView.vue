@@ -19,6 +19,9 @@
         >
           {{ statusText }}
         </span>
+        <span v-if="errorMsg" class="text-xs text-red-600 bg-red-50 px-3 py-1 rounded-full font-medium max-w-md truncate" :title="errorMsg">
+          {{ errorMsg }}
+        </span>
         <button
           v-if="isRunning"
           class="btn-secondary text-sm"
@@ -47,9 +50,9 @@
     </div>
 
     <!-- Process View -->
-    <div v-if="viewMode === 'process'" class="grid grid-cols-1 lg:grid-cols-3 gap-6">
-      <!-- Left: Pipeline -->
-      <div class="lg:col-span-1">
+    <div v-if="viewMode === 'process'" class="grid grid-cols-1 lg:grid-cols-12 gap-6">
+      <!-- Left: Pipeline (narrower) -->
+      <div class="lg:col-span-3">
         <AgentPipeline
           :events="events"
           :selected-agent="selectedAgent"
@@ -57,21 +60,42 @@
         />
       </div>
 
-      <!-- Right: Output + Tools + Debate -->
-      <div class="lg:col-span-2 space-y-6">
-        <AgentOutput
-          :events="events"
-          :selected-agent="selectedAgent"
-          @clear-selection="onClearSelection"
-        />
-        <ToolCallPanel
-          :events="events"
-          :selected-agent="selectedAgent"
-          @clear-selection="onClearSelection"
-        />
+      <!-- Right: Dynamic Content Area (fixed height, children fill) -->
+      <div class="lg:col-span-9 h-[calc(100vh-80px)] flex flex-col">
+        <!-- Analyst Phase: Agent Output + Tool Calls -->
+        <template v-if="isAnalystPhase">
+          <AgentOutput
+            :events="events"
+            :selected-agent="selectedAgent"
+            :expanded="true"
+            class="flex-1 min-h-0"
+            @clear-selection="onClearSelection"
+          />
+          <ToolCallPanel
+            :events="events"
+            :selected-agent="selectedAgent"
+            :compact="true"
+            class="shrink-0 mt-3"
+            @clear-selection="onClearSelection"
+          />
+        </template>
+
+        <!-- Debate Phase -->
         <DebateView
+          v-if="isDebatePhase"
           :events="events"
           :selected-agent="selectedAgent"
+          class="flex-1 min-h-0"
+          @clear-selection="onClearSelection"
+        />
+
+        <!-- Trader Phase -->
+        <AgentOutput
+          v-if="isTraderPhase"
+          :events="events"
+          :selected-agent="selectedAgent"
+          :expanded="true"
+          class="flex-1 min-h-0"
           @clear-selection="onClearSelection"
         />
       </div>
@@ -116,146 +140,6 @@
           <div class="prose-custom prose max-w-none" v-html="renderMd(result.final_trade_decision)"></div>
         </div>
       </section>
-
-      <!-- Section: 因子评分 -->
-      <section v-if="result">
-        <h2 class="report-section-title">
-          <span class="w-8 h-8 rounded-lg bg-indigo-100 flex items-center justify-center">
-            <span class="text-indigo-600">📈</span>
-          </span>
-          因子评分
-        </h2>
-        <FactorScore :result="result" />
-      </section>
-
-      <hr class="report-divider" />
-
-      <!-- Section: 分析师报告 -->
-      <section>
-        <h2 class="report-section-title">
-          <span class="w-8 h-8 rounded-lg bg-blue-100 flex items-center justify-center">
-            <span class="text-blue-600">🔍</span>
-          </span>
-          分析师报告
-        </h2>
-        <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
-          <div v-if="result?.market_report" class="report-card">
-            <h3 class="flex items-center gap-2 text-sm font-semibold text-blue-700 mb-4 pb-2 border-b border-blue-100">
-              <span class="w-6 h-6 rounded-full bg-blue-500 flex items-center justify-center text-white text-xs">📊</span>
-              市场分析师
-            </h3>
-            <div class="prose-custom prose prose-sm max-w-none max-h-72 overflow-y-auto pr-2" v-html="renderMd(result.market_report)"></div>
-          </div>
-          <div v-if="result?.news_report" class="report-card">
-            <h3 class="flex items-center gap-2 text-sm font-semibold text-orange-700 mb-4 pb-2 border-b border-orange-100">
-              <span class="w-6 h-6 rounded-full bg-orange-500 flex items-center justify-center text-white text-xs">📰</span>
-              新闻分析师
-            </h3>
-            <div class="prose-custom prose prose-sm max-w-none max-h-72 overflow-y-auto pr-2" v-html="renderMd(result.news_report)"></div>
-          </div>
-          <div v-if="result?.fundamentals_report" class="report-card">
-            <h3 class="flex items-center gap-2 text-sm font-semibold text-green-700 mb-4 pb-2 border-b border-green-100">
-              <span class="w-6 h-6 rounded-full bg-green-500 flex items-center justify-center text-white text-xs">💰</span>
-              基本面分析师
-            </h3>
-            <div class="prose-custom prose prose-sm max-w-none max-h-72 overflow-y-auto pr-2" v-html="renderMd(result.fundamentals_report)"></div>
-          </div>
-          <div v-if="result?.sentiment_report" class="report-card">
-            <h3 class="flex items-center gap-2 text-sm font-semibold text-purple-700 mb-4 pb-2 border-b border-purple-100">
-              <span class="w-6 h-6 rounded-full bg-purple-500 flex items-center justify-center text-white text-xs">💬</span>
-              社交媒体分析师
-            </h3>
-            <div class="prose-custom prose prose-sm max-w-none max-h-72 overflow-y-auto pr-2" v-html="renderMd(result.sentiment_report)"></div>
-          </div>
-        </div>
-      </section>
-
-      <hr class="report-divider" />
-
-      <!-- Section: 多空辩论 -->
-      <section v-if="result?.investment_debate_state">
-        <h2 class="report-section-title">
-          <span class="w-8 h-8 rounded-lg bg-green-100 flex items-center justify-center">
-            <span class="text-green-600">⚖️</span>
-          </span>
-          多空辩论
-        </h2>
-        <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
-          <div v-if="result.investment_debate_state.bull_history" class="report-card-colored border-2 border-green-200 bg-gradient-to-br from-green-50 to-white">
-            <h3 class="flex items-center gap-2 text-sm font-semibold text-green-700 mb-4 pb-2 border-b border-green-100">
-              <span class="w-6 h-6 rounded-full bg-green-500 flex items-center justify-center text-white text-xs">🐂</span>
-              多方研究员
-            </h3>
-            <div class="prose-custom prose prose-sm max-w-none max-h-72 overflow-y-auto pr-2" v-html="renderMd(result.investment_debate_state.bull_history)"></div>
-          </div>
-          <div v-if="result.investment_debate_state.bear_history" class="report-card-colored border-2 border-red-200 bg-gradient-to-br from-red-50 to-white">
-            <h3 class="flex items-center gap-2 text-sm font-semibold text-red-700 mb-4 pb-2 border-b border-red-100">
-              <span class="w-6 h-6 rounded-full bg-red-500 flex items-center justify-center text-white text-xs">🐻</span>
-              空方研究员
-            </h3>
-            <div class="prose-custom prose prose-sm max-w-none max-h-72 overflow-y-auto pr-2" v-html="renderMd(result.investment_debate_state.bear_history)"></div>
-          </div>
-        </div>
-      </section>
-
-      <!-- Section: 研究经理 -->
-      <section v-if="result?.investment_plan">
-        <div class="report-card-colored border-2 border-indigo-200 bg-gradient-to-br from-indigo-50 to-white">
-          <h3 class="flex items-center gap-2 text-sm font-semibold text-indigo-700 mb-4 pb-2 border-b border-indigo-100">
-            <span class="w-6 h-6 rounded-full bg-indigo-500 flex items-center justify-center text-white text-xs">👨‍💼</span>
-            研究经理投资计划
-          </h3>
-          <div class="prose-custom prose prose-sm max-w-none" v-html="renderMd(result.investment_plan)"></div>
-        </div>
-      </section>
-
-      <!-- Section: 交易员 -->
-      <section v-if="result?.trader_investment_plan">
-        <div class="report-card-colored border-2 border-cyan-200 bg-gradient-to-br from-cyan-50 to-white">
-          <h3 class="flex items-center gap-2 text-sm font-semibold text-cyan-700 mb-4 pb-2 border-b border-cyan-100">
-            <span class="w-6 h-6 rounded-full bg-cyan-500 flex items-center justify-center text-white text-xs">💹</span>
-            交易员投资计划
-          </h3>
-          <div class="prose-custom prose prose-sm max-w-none" v-html="renderMd(result.trader_investment_plan)"></div>
-        </div>
-      </section>
-
-      <hr class="report-divider" />
-
-      <!-- Section: 风控辩论 -->
-      <section v-if="result?.risk_debate_state">
-        <h2 class="report-section-title">
-          <span class="w-8 h-8 rounded-lg bg-amber-100 flex items-center justify-center">
-            <span class="text-amber-600">🛡️</span>
-          </span>
-          风控辩论
-        </h2>
-        <div class="grid grid-cols-1 md:grid-cols-3 gap-6">
-          <div v-if="result.risk_debate_state.aggressive_history" class="report-card-colored border-2 border-orange-200 bg-gradient-to-br from-orange-50 to-white">
-            <h3 class="flex items-center gap-2 text-sm font-semibold text-orange-700 mb-4 pb-2 border-b border-orange-100">
-              <span class="w-6 h-6 rounded-full bg-orange-500 flex items-center justify-center text-white text-xs">🔥</span>
-              激进风控
-            </h3>
-            <div class="prose-custom prose prose-sm max-w-none max-h-72 overflow-y-auto pr-2" v-html="renderMd(result.risk_debate_state.aggressive_history)"></div>
-          </div>
-          <div v-if="result.risk_debate_state.conservative_history" class="report-card-colored border-2 border-blue-200 bg-gradient-to-br from-blue-50 to-white">
-            <h3 class="flex items-center gap-2 text-sm font-semibold text-blue-700 mb-4 pb-2 border-b border-blue-100">
-              <span class="w-6 h-6 rounded-full bg-blue-500 flex items-center justify-center text-white text-xs">🧊</span>
-              保守风控
-            </h3>
-            <div class="prose-custom prose prose-sm max-w-none max-h-72 overflow-y-auto pr-2" v-html="renderMd(result.risk_debate_state.conservative_history)"></div>
-          </div>
-          <div v-if="result.risk_debate_state.neutral_history" class="report-card-colored border-2 border-gray-200 bg-gradient-to-br from-gray-50 to-white">
-            <h3 class="flex items-center gap-2 text-sm font-semibold text-gray-700 mb-4 pb-2 border-b border-gray-100">
-              <span class="w-6 h-6 rounded-full bg-gray-500 flex items-center justify-center text-white text-xs">⚖️</span>
-              中性风控
-            </h3>
-            <div class="prose-custom prose prose-sm max-w-none max-h-72 overflow-y-auto pr-2" v-html="renderMd(result.risk_debate_state.neutral_history)"></div>
-          </div>
-        </div>
-      </section>
-
-      <hr class="report-divider" />
 
       <!-- Section: K线图表 -->
       <section>
@@ -304,12 +188,60 @@ const tradeDate = ref('')
 const status = ref('pending')
 const signal = ref('')
 const result = ref(null)
-const selectedAgent = ref('')
+const selectedAgent = ref('Market Analyst')  // Default to first analyst
 const viewMode = ref('process')  // 'process' or 'report'
+const errorMsg = ref('')
 let cleanup = null
 
 const isRunning = computed(() => status.value === 'running' || status.value === 'pending')
 const isCompleted = computed(() => status.value === 'completed')
+
+// Agent type classifications
+const analystAgents = ['Market Analyst', 'Social Analyst', 'News Analyst', 'Fundamentals Analyst']
+const debateAgents = ['Bull Researcher', 'Bear Researcher', 'Aggressive Analyst', 'Conservative Analyst', 'Neutral Analyst']
+const judgeAgents = ['Research Manager', 'Risk Judge']
+const traderAgents = ['Trader']
+
+// Determine current phase based on selection or running agent
+// selectedAgent defaults to 'Market Analyst', so effectiveAgent always has a value
+const effectiveAgent = computed(() => {
+  // When running, follow the running agent (but keep selection if explicitly made)
+  const running = currentRunningAgent.value
+  const isCompleted = events.value.some(e => e.type === 'completed')
+  if (running && !isCompleted) {
+    // Only auto-switch to running agent during analysis
+    return running
+  }
+  // After completion or before start, use selected agent (defaults to Market Analyst)
+  return selectedAgent.value
+})
+
+const currentRunningAgent = computed(() => {
+  // Find the most recent running agent from events
+  for (let i = events.value.length - 1; i >= 0; i--) {
+    const ev = events.value[i]
+    if (ev.type === 'agent_start') return ev.data.agent_name
+    if (ev.type === 'debate_speech') {
+      // Map debate speech side back to agent
+      const sideToAgent = {
+        bull: 'Bull Researcher',
+        bear: 'Bear Researcher',
+        aggressive: 'Aggressive Analyst',
+        conservative: 'Conservative Analyst',
+        neutral: 'Neutral Analyst'
+      }
+      return sideToAgent[ev.data.side] || ev.data.speaker
+    }
+    if (ev.type === 'debate_judge') return ev.data.judge
+    if (ev.type === 'trader_plan') return 'Trader'
+    if (ev.type === 'final_decision') return 'Trader'
+  }
+  return null
+})
+
+const isAnalystPhase = computed(() => analystAgents.includes(effectiveAgent.value))
+const isDebatePhase = computed(() => debateAgents.includes(effectiveAgent.value) || judgeAgents.includes(effectiveAgent.value))
+const isTraderPhase = computed(() => traderAgents.includes(effectiveAgent.value))
 
 const statusText = computed(() => {
   const map = {
@@ -375,6 +307,7 @@ function handleEvent(event) {
   }
   if (event.type === 'failed') {
     status.value = 'failed'
+    errorMsg.value = event.data.error || '分析失败'
     taskStore.setStatus('failed')
   }
 }
@@ -387,6 +320,7 @@ async function loadTaskInfo() {
     tradeDate.value = info.trade_date
     status.value = info.status
     signal.value = info.signal || ''
+    if (info.error) errorMsg.value = info.error
     return info.status
   } catch (e) {
     console.error('load task info failed', e)

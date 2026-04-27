@@ -1,5 +1,5 @@
 <template>
-  <div class="card flex flex-col" style="max-height: 480px;">
+  <div class="card flex flex-col" :style="fullHeightStyle">
     <h3 class="text-sm font-semibold text-gray-700 mb-3 flex items-center gap-2 shrink-0">
       <span class="w-2 h-2 rounded-full bg-purple-500"></span>
       辩论环节
@@ -7,36 +7,40 @@
         {{ agentNameDisplay(selectedAgent) }}
         <button @click="clearSelection" class="ml-1 hover:text-primary-900">×</button>
       </span>
+      <span class="text-xs text-gray-400 ml-2">({{ filteredSpeeches.length }}条发言)</span>
     </h3>
 
     <!-- Scrollable speech area -->
-    <div ref="scrollEl" class="flex-1 overflow-y-auto space-y-3 pr-1 min-h-0">
-      <div v-if="filteredSpeeches.length === 0 && !filteredJudgeDecision" class="text-center text-gray-400 text-sm py-6">
+    <div ref="scrollEl" class="flex-1 flex flex-col overflow-y-auto pr-1 min-h-0 gap-3">
+      <div v-if="filteredSpeeches.length === 0 && !filteredJudgeDecision" class="flex-1 flex items-center justify-center text-gray-400 text-sm">
         {{ selectedAgent ? '该 Agent 暂无辩论发言' : '等待辩论开始...' }}
       </div>
       <div
         v-for="(sp, idx) in filteredSpeeches"
         :key="idx"
-        class="flex"
-        :class="alignClass(sp.side)"
+        class="flex flex-1"
+        :class="alignClass(sp)"
       >
         <div
-          class="max-w-[85%] p-3 rounded-xl text-sm"
+          class="p-4 rounded-xl text-sm shadow-sm w-full flex flex-col"
           :class="bubbleClass(sp)"
         >
-          <div class="flex items-center gap-2 mb-1">
+          <div class="flex items-center gap-2 mb-2 shrink-0">
             <span class="text-xs font-bold">{{ speakerLabel(sp) }}</span>
-            <span class="text-xs opacity-60">第{{ sp.round }}轮</span>
+            <span class="text-xs px-1.5 py-0.5 rounded-full bg-white/50">第{{ sp.round }}轮</span>
           </div>
-          <!-- Content with its own scroll if very long -->
-          <div class="leading-relaxed whitespace-pre-wrap max-h-48 overflow-y-auto">{{ sp.content }}</div>
+          <!-- Content fills remaining height -->
+          <div class="flex-1 overflow-y-auto prose-custom prose prose-sm max-w-none" v-html="renderMd(sp.content)"></div>
         </div>
       </div>
 
-      <!-- Judge decision inline at bottom of scroll area -->
-      <div v-if="filteredJudgeDecision" class="p-3 bg-purple-50 border border-purple-200 rounded-lg">
-        <div class="text-xs font-bold text-purple-700 mb-1">⚖️ 裁判决策</div>
-        <div class="text-sm text-purple-900 whitespace-pre-wrap max-h-40 overflow-y-auto">{{ filteredJudgeDecision }}</div>
+      <!-- Judge decision fills remaining space -->
+      <div v-if="filteredJudgeDecision" class="flex-1 flex flex-col p-4 bg-gradient-to-r from-purple-50 to-indigo-50 border-2 border-purple-300 rounded-xl shadow-md min-h-0">
+        <div class="flex items-center gap-2 mb-2 shrink-0">
+          <span class="text-base">⚖️</span>
+          <span class="text-xs font-bold text-purple-700">裁判决策</span>
+        </div>
+        <div class="flex-1 overflow-y-auto text-sm text-purple-900 leading-relaxed prose-custom prose prose-sm max-w-none" v-html="renderMd(filteredJudgeDecision)"></div>
       </div>
     </div>
   </div>
@@ -44,15 +48,28 @@
 
 <script setup>
 import { computed, ref, watch, nextTick } from 'vue'
+import { marked } from 'marked'
 
 const props = defineProps({
   events: { type: Array, default: () => [] },
   selectedAgent: { type: String, default: '' },
+  fullHeight: { type: Boolean, default: false },
 })
 
 const emit = defineEmits(['clear-selection'])
 
 const scrollEl = ref(null)
+
+function renderMd(text) {
+  if (!text) return ''
+  const cleaned = text.replace(/<think[\s\S]*?<\/think>/gi, '').trim()
+  return marked.parse(cleaned)
+}
+
+// Fill parent container via flex, internal scroll
+const fullHeightStyle = computed(() => {
+  return 'height: 100%;'
+})
 
 const nameMap = {
   'Bull Researcher': '多方研究员',
@@ -125,19 +142,16 @@ function clearSelection() {
 }
 
 function alignClass(side) {
-  // Bull/Aggressive → left, Bear/Conservative → right, Neutral → center
-  if (side === 'bull' || side === 'aggressive') return 'justify-start'
-  if (side === 'bear' || side === 'conservative') return 'justify-end'
-  return 'justify-center'
+  return 'justify-start'
 }
 
 function bubbleClass(sp) {
   const map = {
-    bull: 'bg-green-50 border border-green-200 text-green-800',
-    bear: 'bg-red-50 border border-red-200 text-red-800',
-    aggressive: 'bg-orange-50 border border-orange-200 text-orange-800',
-    conservative: 'bg-blue-50 border border-blue-200 text-blue-800',
-    neutral: 'bg-gray-50 border border-gray-200 text-gray-800',
+    bull: 'bg-gradient-to-r from-green-50 to-green-100 border-2 border-green-300 text-green-800',
+    bear: 'bg-gradient-to-r from-red-50 to-red-100 border-2 border-red-300 text-red-800',
+    aggressive: 'bg-gradient-to-r from-orange-50 to-orange-100 border-2 border-orange-300 text-orange-800',
+    conservative: 'bg-gradient-to-r from-blue-50 to-blue-100 border-2 border-blue-300 text-blue-800',
+    neutral: 'bg-gradient-to-r from-gray-50 to-gray-100 border-2 border-gray-300 text-gray-800',
   }
   return map[sp.side] || map.neutral
 }

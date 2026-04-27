@@ -418,36 +418,41 @@ def get_pledge_ratio(
 
     Note:
         akshare's stock_gpzy_pledge_ratio_em returns all stocks for a given date.
-        We filter for the target stock code.
+        We filter for the target stock code. If the requested date has no data
+        (e.g., weekends/holidays), falls back to recent trading days.
     """
-    try:
-        stock_code, market = _convert_ticker_format(ticker)
+    stock_code, market = _convert_ticker_format(ticker)
 
-        # Get latest pledge data (today's date)
-        date_str = datetime.now().strftime("%Y%m%d")
-        df = ak.stock_gpzy_pledge_ratio_em(date=date_str)
+    # Try today and recent days (up to 7 days back) to find valid data
+    for days_back in range(8):
+        try:
+            date = datetime.now() - pd.Timedelta(days=days_back)
+            date_str = date.strftime("%Y%m%d")
+            df = ak.stock_gpzy_pledge_ratio_em(date=date_str)
 
-        if df.empty:
-            return f"No pledge ratio data available for {date_str}"
+            if df.empty or "股票代码" not in df.columns:
+                continue
 
-        # Filter for target stock
-        if "股票代码" in df.columns:
             df_stock = df[df["股票代码"] == stock_code]
+            date_display = date.strftime("%Y-%m-%d")
             if df_stock.empty:
-                # Stock not in pledge list - this is actually good (no pledge risk)
                 header = f"# Stock Pledge Ratio for {ticker}\n"
-                header += f"# Date: {datetime.now().strftime('%Y-%m-%d')}\n"
+                header += f"# Date: {date_display}\n"
                 header += f"# Status: No pledge records found (low pledge risk)\n"
                 header += f"# Retrieved on: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n"
                 return header
             else:
                 header = f"# Stock Pledge Ratio for {ticker}\n"
-                header += f"# Date: {datetime.now().strftime('%Y-%m-%d')}\n"
+                header += f"# Date: {date_display}\n"
                 header += f"# Retrieved on: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n"
                 header += f"# Key fields: 质押比例, 质押股数, 质押市值, 质押笔数\n"
-                df = df_stock
+                return _format_to_csv(df_stock, header)
+        except (TypeError, AttributeError):
+            # No data for this date (weekend/holiday), try previous day
+            continue
+        except Exception:
+            # Other akshare errors, try previous day
+            continue
 
-        return _format_to_csv(df, header)
-
-    except Exception as e:
-        raise AkshareDataError(f"Failed to get pledge ratio for {ticker}: {str(e)}")
+    # All attempts failed
+    raise AkshareDataError(f"No pledge ratio data available for {ticker} in the last 7 days")
