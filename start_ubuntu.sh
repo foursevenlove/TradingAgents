@@ -101,10 +101,11 @@ build_frontend() {
 
     cd web/frontend
 
+    # 清理旧的 node_modules（避免损坏的依赖）
+    rm -rf node_modules package-lock.json
+
     # 安装依赖
-    if [ ! -d "node_modules" ]; then
-        npm install
-    fi
+    npm install
 
     # 构建
     npm run build
