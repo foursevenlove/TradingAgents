@@ -17,12 +17,19 @@ log_info() { echo -e "${GREEN}[INFO]${NC} $1"; }
 log_warn() { echo -e "${YELLOW}[WARN]${NC} $1"; }
 log_error() { echo -e "${RED}[ERROR]${NC} $1"; }
 
-# 检查 Python
+# 检查 Python 和 venv
 check_python() {
     if ! command -v python3 &> /dev/null; then
         log_error "Python3 未安装，请先安装: sudo apt install python3 python3-pip python3-venv"
         exit 1
     fi
+
+    # Ubuntu 23.04+ 需要确保 python3-venv 已安装
+    if ! python3 -c "import venv" 2>/dev/null; then
+        log_error "python3-venv 未安装，请执行: sudo apt install python3-venv"
+        exit 1
+    fi
+
     log_info "Python3: $(python3 --version)"
 }
 
@@ -41,21 +48,23 @@ check_node() {
 install_python_deps() {
     log_info "安装 Python 依赖..."
 
-    # 创建虚拟环境（推荐）
+    # 创建虚拟环境（Ubuntu 23.04+ 必须）
     if [ ! -d "venv" ]; then
         python3 -m venv venv
         log_info "创建虚拟环境: venv/"
     fi
 
-    # 激活虚拟环境
-    source venv/bin/activate
+    # 直接使用 venv 的 pip（不依赖 activate）
+    VENV_PIP="./venv/bin/pip"
+    VENV_PYTHON="./venv/bin/python"
 
     # 安装依赖
-    pip install --upgrade pip
-    pip install -r requirements.txt
-    pip install -e .
+    $VENV_PIP install --upgrade pip
+    $VENV_PIP install -r requirements.txt
+    $VENV_PIP install -e .
 
     log_info "Python 依赖安装完成"
+    log_info "使用: ./venv/bin/python 或 source venv/bin/activate"
 }
 
 # 构建前端
@@ -84,8 +93,11 @@ build_frontend() {
 start_service() {
     log_info "启动 TradingAgents Web 服务..."
 
-    # 激活虚拟环境
-    source venv/bin/activate
+    # 检查 venv
+    if [ ! -d "venv" ]; then
+        log_error "虚拟环境不存在，请先运行: ./start_ubuntu.sh install"
+        exit 1
+    fi
 
     # 检查 .env 文件
     if [ ! -f ".env" ]; then
@@ -104,8 +116,8 @@ start_service() {
     log_info "API 文档: http://localhost:${PORT}/docs"
     log_info "按 Ctrl+C 停止服务"
 
-    # 启动 uvicorn
-    uvicorn web.backend.app:app --host "$HOST" --port "$PORT"
+    # 直接使用 venv 的 uvicorn 启动
+    ./venv/bin/uvicorn web.backend.app:app --host "$HOST" --port "$PORT"
 }
 
 # 停止服务
@@ -122,13 +134,16 @@ show_help() {
     echo "用法: ./start_ubuntu.sh [命令]"
     echo ""
     echo "命令:"
-    echo "  install   安装依赖（Python + 前端）"
+    echo "  install   安装依赖（Python venv + pip）"
     echo "  build     构建前端"
     echo "  start     启动 Web 服务"
     echo "  stop      停止服务"
     echo "  restart   重启服务"
     echo "  all       安装 + 构建 + 启动（首次部署）"
     echo "  help      显示帮助信息"
+    echo ""
+    echo "Ubuntu 23.04+ 系统依赖:"
+    echo "  sudo apt install python3 python3-pip python3-venv nodejs npm"
     echo ""
     echo "环境变量:"
     echo "  TRADINGAGENTS_WEB_HOST  服务地址 (默认: 0.0.0.0)"
