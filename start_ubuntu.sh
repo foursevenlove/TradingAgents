@@ -37,10 +37,23 @@ check_python() {
 check_node() {
     if ! command -v node &> /dev/null; then
         log_warn "Node.js 未安装，跳过前端构建"
-        log_warn "如需 Web UI，请安装: sudo apt install nodejs npm"
+        log_warn "如需 Web UI，请安装 Node.js 20+:"
+        log_warn "  curl -fsSL https://deb.nodesource.com/setup_20.x | sudo -E bash -"
+        log_warn "  sudo apt install nodejs"
         return 1
     fi
-    log_info "Node.js: $(node --version)"
+
+    NODE_VERSION=$(node --version)
+    MAJOR=$(echo "$NODE_VERSION" | sed 's/v//' | cut -d. -f1)
+
+    if [ "$MAJOR" -lt 20 ]; then
+        log_warn "Node.js $NODE_VERSION 版本较低，建议升级到 20+"
+        log_warn "升级命令:"
+        log_warn "  curl -fsSL https://deb.nodesource.com/setup_20.x | sudo -E bash -"
+        log_warn "  sudo apt install nodejs"
+    fi
+
+    log_info "Node.js: $NODE_VERSION"
     return 0
 }
 
@@ -71,6 +84,17 @@ install_python_deps() {
 build_frontend() {
     if ! check_node; then
         return
+    fi
+
+    NODE_VERSION=$(node --version | sed 's/v//')
+    MAJOR_VERSION=$(echo "$NODE_VERSION" | cut -d. -f1)
+
+    if [ "$MAJOR_VERSION" -lt 20 ]; then
+        log_error "Node.js 版本过低 ($NODE_VERSION)，Vite 6 需要 Node >= 20"
+        log_info "升级方法:"
+        log_info "  curl -fsSL https://deb.nodesource.com/setup_20.x | sudo -E bash -"
+        log_info "  sudo apt install nodejs"
+        return 1
     fi
 
     log_info "构建前端..."
@@ -142,8 +166,11 @@ show_help() {
     echo "  all       安装 + 构建 + 启动（首次部署）"
     echo "  help      显示帮助信息"
     echo ""
-    echo "Ubuntu 23.04+ 系统依赖:"
-    echo "  sudo apt install python3 python3-pip python3-venv nodejs npm"
+    echo "Ubuntu 系统依赖:"
+    echo "  sudo apt install python3 python3-pip python3-venv"
+    echo "  # Node.js 20+ (前端构建)"
+    echo "  curl -fsSL https://deb.nodesource.com/setup_20.x | sudo -E bash -"
+    echo "  sudo apt install nodejs"
     echo ""
     echo "环境变量:"
     echo "  TRADINGAGENTS_WEB_HOST  服务地址 (默认: 0.0.0.0)"
