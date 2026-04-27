@@ -75,3 +75,19 @@ def get_income_statement(
         str: 包含利润表数据的格式化报告
     """
     return route_to_vendor("get_income_statement", ticker, freq, curr_date)
+
+
+@tool
+def get_pledge_ratio(
+    ticker: Annotated[str, "股票代码"],
+) -> str:
+    """
+    获取指定股票代码的股权质押比例数据。
+    股权质押比例是股东质押股份占总股本的比例，高质押比例可能带来风险。
+    使用akshare数据源（仅akshare支持）。
+    参数：
+        ticker (str): 股票代码
+    返回：
+        str: 包含股权质押数据的格式化报告
+    """
+    return route_to_vendor("get_pledge_ratio", ticker)

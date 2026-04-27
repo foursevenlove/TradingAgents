@@ -34,6 +34,7 @@ from .akshare_indicators import (
     get_institutional_holdings,
     get_limit_up_down_stats,
     get_market_sentiment_index,
+    get_pledge_ratio,
 )
 
 # Import common utilities and exceptions
@@ -61,6 +62,7 @@ __all__ = [
     "get_institutional_holdings",
     "get_limit_up_down_stats",
     "get_market_sentiment_index",
+    "get_pledge_ratio",
     # Exceptions
     "AkshareDataError",
 ]

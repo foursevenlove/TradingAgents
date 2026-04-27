@@ -400,3 +400,54 @@ def get_market_sentiment_index(
 
     except Exception as e:
         raise AkshareDataError(f"Failed to get market sentiment index: {str(e)}")
+
+
+def get_pledge_ratio(
+    ticker: Annotated[str, "A-share ticker symbol"],
+) -> str:
+    """Get stock pledge ratio data (股权质押比例数据).
+
+    Stock pledge (股权质押) is when shareholders pledge their shares as collateral
+    for loans. High pledge ratio indicates potential risk if shareholders default.
+
+    Args:
+        ticker: A-share ticker symbol
+
+    Returns:
+        CSV string containing pledge ratio data for the specified stock
+
+    Note:
+        akshare's stock_gpzy_pledge_ratio_em returns all stocks for a given date.
+        We filter for the target stock code.
+    """
+    try:
+        stock_code, market = _convert_ticker_format(ticker)
+
+        # Get latest pledge data (today's date)
+        date_str = datetime.now().strftime("%Y%m%d")
+        df = ak.stock_gpzy_pledge_ratio_em(date=date_str)
+
+        if df.empty:
+            return f"No pledge ratio data available for {date_str}"
+
+        # Filter for target stock
+        if "股票代码" in df.columns:
+            df_stock = df[df["股票代码"] == stock_code]
+            if df_stock.empty:
+                # Stock not in pledge list - this is actually good (no pledge risk)
+                header = f"# Stock Pledge Ratio for {ticker}\n"
+                header += f"# Date: {datetime.now().strftime('%Y-%m-%d')}\n"
+                header += f"# Status: No pledge records found (low pledge risk)\n"
+                header += f"# Retrieved on: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n"
+                return header
+            else:
+                header = f"# Stock Pledge Ratio for {ticker}\n"
+                header += f"# Date: {datetime.now().strftime('%Y-%m-%d')}\n"
+                header += f"# Retrieved on: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n"
+                header += f"# Key fields: 质押比例, 质押股数, 质押市值, 质押笔数\n"
+                df = df_stock
+
+        return _format_to_csv(df, header)
+
+    except Exception as e:
+        raise AkshareDataError(f"Failed to get pledge ratio for {ticker}: {str(e)}")

@@ -42,6 +42,7 @@ from .akshare import (
     get_block_trade as get_akshare_block_trade,
     get_institutional_holdings as get_akshare_institutional_holdings,
     get_limit_up_down_stats as get_akshare_limit_up_down_stats,
+    get_pledge_ratio as get_akshare_pledge_ratio,
     AkshareDataError,
 )
 
@@ -94,7 +95,8 @@ TOOLS_CATEGORIES = {
             "get_fundamentals",
             "get_balance_sheet",
             "get_cashflow",
-            "get_income_statement"
+            "get_income_statement",
+            "get_pledge_ratio",
         ]
     },
     "news_data": {
@@ -179,6 +181,9 @@ VENDOR_METHODS = {
         "tushare": get_tushare_income_statement,
         "alpha_vantage": get_alpha_vantage_income_statement,
         "yfinance": get_yfinance_income_statement,
+    },
+    "get_pledge_ratio": {
+        "akshare": get_akshare_pledge_ratio,
     },
     # news_data
     "get_news": {
