@@ -44,6 +44,9 @@ from tradingagents.agents.utils.agent_utils import (
     get_industry_performance,
 )
 
+# Import additional news tools from news_data_tools
+from tradingagents.agents.utils.news_data_tools import get_cctv_news
+
 from .conditional_logic import ConditionalLogic
 from .setup import GraphSetup
 from .propagation import Propagator
@@ -210,6 +213,8 @@ class TradingAgentsGraph:
                     get_news,
                     get_global_news,
                     get_insider_transactions,
+                    # Macro policy news (CCTV news broadcast)
+                    get_cctv_news,
                 ]
             ),
             "fundamentals": ToolNode(

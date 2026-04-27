@@ -63,7 +63,10 @@ class SchedulerService:
             logger.error(f"Invalid cron expression: {cron_expr} - {e}")
             return
 
-        # Check if it's time to run (within 60s window)
+        # Check if it's time to run
+        # Allow execution if:
+        # 1. Within 60s before scheduled time (diff <= 60 and diff > 0)
+        # 2. Within 5min after scheduled time (diff <= 0 and diff > -300) - catch missed triggers
         last_run_str = schedule.get("last_run_at")
         now = datetime.now(timezone.utc)
 
@@ -71,8 +74,13 @@ class SchedulerService:
         next_run_utc = next_run.replace(tzinfo=timezone.utc) if next_run.tzinfo is None else next_run.astimezone(timezone.utc)
         diff = (next_run_utc - now).total_seconds()
 
+        # Skip if too far before scheduled time
         if diff > 60:
             return  # Not time yet
+
+        # Skip if too far after scheduled time (missed window)
+        if diff < -300:
+            return  # Too late, wait for next cycle
 
         # Check we haven't already run for this scheduled time
         if last_run_str:

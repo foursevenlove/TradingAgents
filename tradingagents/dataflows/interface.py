@@ -56,6 +56,7 @@ from tradingagents.market_data.industry_classification import (
 from .tushare_news import (
     get_news as get_tushare_news,
     get_global_news as get_tushare_global_news,
+    get_cctv_news as get_tushare_cctv_news,
     get_insider_transactions as get_tushare_insider_transactions,
     TushareDataError,
 )
@@ -102,6 +103,12 @@ TOOLS_CATEGORIES = {
             "get_news",
             "get_global_news",
             "get_insider_transactions",
+        ]
+    },
+    "macro_policy_news": {
+        "description": "Macro policy news (CCTV news broadcast transcripts)",
+        "tools": [
+            "get_cctv_news",
         ]
     },
     "ashare_market_indicators": {
@@ -192,6 +199,10 @@ VENDOR_METHODS = {
         "alpha_vantage": get_alpha_vantage_insider_transactions,
         "yfinance": get_yfinance_insider_transactions,
     },
+    # macro_policy_news
+    "get_cctv_news": {
+        "tushare": get_tushare_cctv_news,
+    },
     # ashare_market_indicators
     "get_north_bound_flow": {
         "akshare": get_akshare_north_bound_flow,
@@ -261,6 +272,75 @@ def route_to_vendor(method: str, *args, **kwargs):
         if vendor not in fallback_vendors:
             fallback_vendors.append(vendor)
 
+    # Special handling for news methods with tushare keyword filtering + akshare fallback
+    if method in ["get_news", "get_global_news"]:
+        tushare_result = None
+        akshare_result = None
+
+        # Try tushare first if in fallback chain
+        if "tushare" in fallback_vendors and "tushare" in VENDOR_METHODS[method]:
+            try:
+                vendor_impl = VENDOR_METHODS[method]["tushare"]
+                impl_func = vendor_impl[0] if isinstance(vendor_impl, list) else vendor_impl
+                tushare_result = impl_func(*args, **kwargs)
+
+                # Check if tushare indicates fallback needed
+                if "_FALLBACK_TO_AKSHARE_" in str(tushare_result):
+                    # Call akshare as supplement
+                    if "akshare" in VENDOR_METHODS[method]:
+                        try:
+                            akshare_impl = VENDOR_METHODS[method]["akshare"]
+                            akshare_func = akshare_impl[0] if isinstance(akshare_impl, list) else akshare_impl
+                            akshare_result = akshare_func(*args, **kwargs)
+
+                            # Combine results: tushare data + akshare data
+                            if tushare_result and akshare_result:
+                                # Extract tushare content (remove fallback marker)
+                                tushare_content = tushare_result.replace("_FALLBACK_TO_AKSHARE_", "").strip()
+
+                                # Extract akshare data (remove header if present)
+                                akshare_data = akshare_result
+                                if akshare_result.startswith("#"):
+                                    # Skip akshare header, keep data
+                                    lines = akshare_result.split("\n")
+                                    data_start = 0
+                                    for i, line in enumerate(lines):
+                                        if not line.startswith("#") and line.strip():
+                                            data_start = i
+                                            break
+                                    akshare_data = "\n".join(lines[data_start:])
+
+                                # Combine with clear section marker
+                                return tushare_content + "\n\n# === AKSHARE SUPPLEMENT (补充数据) ===\n" + akshare_data
+                            return akshare_result
+                        except (AkshareDataError, Exception):
+                            pass
+                    # If akshare fails, return tushare result without fallback marker
+                    return tushare_result.replace("_FALLBACK_TO_AKSHARE_", "")
+                else:
+                    # Tushare returned valid data, use it
+                    return tushare_result
+            except (TushareNewsDataError, TushareDataError):
+                tushare_result = None
+
+        # If tushare not available or failed, try other vendors
+        for vendor in fallback_vendors:
+            if vendor == "tushare":
+                continue  # Already tried
+            if vendor not in VENDOR_METHODS[method]:
+                continue
+
+            vendor_impl = VENDOR_METHODS[method][vendor]
+            impl_func = vendor_impl[0] if isinstance(vendor_impl, list) else vendor_impl
+
+            try:
+                return impl_func(*args, **kwargs)
+            except (AlphaVantageRateLimitError, TushareNewsDataError, TushareStockDataError, AkshareDataError):
+                continue
+
+        raise RuntimeError(f"No available vendor for '{method}'")
+
+    # Standard fallback for non-news methods
     for vendor in fallback_vendors:
         if vendor not in VENDOR_METHODS[method]:
             continue
