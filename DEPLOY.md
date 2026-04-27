@@ -1,6 +1,80 @@
-# TradingAgents Docker 部署指南
+# TradingAgents 部署指南
 
-## 快速部署
+## 方式一：Ubuntu 直接部署（推荐）
+
+### 1. 安装依赖
+
+```bash
+# Ubuntu 系统依赖
+sudo apt update
+sudo apt install python3 python3-pip python3-venv nodejs npm
+
+# 克隆项目
+git clone https://github.com/your-repo/TradingAgents.git
+cd TradingAgents
+
+# 配置环境变量
+cp .env.example .env
+# 编辑 .env 添加 API Keys
+```
+
+### 2. 一键部署
+
+```bash
+# 首次部署：安装依赖 + 构建前端 + 启动服务
+./start_ubuntu.sh all
+```
+
+### 3. 常用命令
+
+```bash
+./start_ubuntu.sh install   # 仅安装 Python 依赖
+./start_ubuntu.sh build     # 仅构建前端
+./start_ubuntu.sh start     # 启动服务
+./start_ubuntu.sh stop      # 停止服务
+./start_ubuntu.sh restart   # 重启服务
+./start_ubuntu.sh help      # 显示帮助
+```
+
+### 4. 后台运行（生产环境）
+
+```bash
+# 使用 nohup 后台运行
+nohup ./start_ubuntu.sh start > logs/server.log 2>&1 &
+
+# 或使用 systemd（推荐）
+```
+
+创建 systemd 服务文件 `/etc/systemd/system/tradingagents.service`：
+
+```ini
+[Unit]
+Description=TradingAgents Web Service
+After=network.target
+
+[Service]
+Type=simple
+User=your-user
+WorkingDirectory=/path/to/TradingAgents
+Environment="TRADINGAGENTS_WEB_PORT=8000"
+ExecStart=/path/to/TradingAgents/venv/bin/uvicorn web.backend.app:app --host 0.0.0.0 --port 8000
+Restart=always
+RestartSec=3
+
+[Install]
+WantedBy=multi-user.target
+```
+
+```bash
+sudo systemctl daemon-reload
+sudo systemctl enable tradingagents
+sudo systemctl start tradingagents
+sudo systemctl status tradingagents
+```
+
+---
+
+## 方式二：Docker 部署
 
 ### 1. 准备环境变量
 
