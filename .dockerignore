@@ -1,0 +1,65 @@
+# Git
+.git
+.gitignore
+
+# Python
+__pycache__
+*.py[cod]
+*$py.class
+*.so
+.Python
+*.egg-info
+.eggs
+*.egg
+dist/
+build/
+
+# Virtual environments
+.env
+.venv
+venv/
+ENV/
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# Claude
+.claude/
+
+# Node (frontend source - we only need dist)
+web/frontend/node_modules/
+web/frontend/src/
+web/frontend/public/
+web/frontend/*.config.js
+web/frontend/package*.json
+
+# Logs and temporary files (will be created at runtime)
+logs/
+*.log
+backend.log
+
+# Database files (persistent via volume)
+*.db
+tasks.db
+tradingagents.db
+
+# Test and eval
+eval_results/
+tests/
+test_*.py
+
+# Documentation
+*.md
+!README.md
+docs/
+assets/
+
+# Misc
+.DS_Store
+*.xlsx
+uv.lock
+reports/
+results/

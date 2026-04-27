@@ -1,0 +1,49 @@
+version: "3.8"
+
+services:
+  tradingagents:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: tradingagents:latest
+    container_name: tradingagents-web
+    restart: unless-stopped
+    ports:
+      - "${TRADINGAGENTS_PORT:-8000}:8000"
+    environment:
+      # LLM Provider API Keys (configure as needed)
+      - MINIMAX_API_KEY=${MINIMAX_API_KEY:-}
+      - DASHSCOPE_API_KEY=${DASHSCOPE_API_KEY:-}
+      - ALIBABA_API_KEY=${ALIBABA_API_KEY:-}
+      - OPENAI_API_KEY=${OPENAI_API_KEY:-}
+      - GOOGLE_API_KEY=${GOOGLE_API_KEY:-}
+      - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY:-}
+      - XAI_API_KEY=${XAI_API_KEY:-}
+      - OPENROUTER_API_KEY=${OPENROUTER_API_KEY:-}
+      # Tushare Token (required for A-share data)
+      - TUSHARE_TOKEN=${TUSHARE_TOKEN:-}
+      # Web configuration
+      - TRADINGAGENTS_WEB_HOST=0.0.0.0
+      - TRADINGAGENTS_WEB_PORT=8000
+      - TRADINGAGENTS_WEB_DB=/app/data/tasks.db
+      - TRADINGAGENTS_WEB_LOG_DIR=/app/logs
+    volumes:
+      # Persist database
+      - tradingagents_data:/app/data
+      # Persist logs
+      - tradingagents_logs:/app/logs
+      # Persist analysis reports and results
+      - tradingagents_reports:/app/reports
+      - tradingagents_results:/app/results
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/docs"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 10s
+
+volumes:
+  tradingagents_data:
+  tradingagents_logs:
+  tradingagents_reports:
+  tradingagents_results:
