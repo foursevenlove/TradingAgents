@@ -118,10 +118,14 @@ const agents = computed(() => {
         statusMap['Risk Judge'] = 'completed'
       }
     } else if (ev.type === 'trader_plan') {
-      // trader_plan means Trader is running (not completed yet)
-      if (!statusMap['Trader']) statusMap['Trader'] = 'running'
-    } else if (ev.type === 'final_decision') {
+      // trader_plan means Trader has completed and output its plan
       statusMap['Trader'] = 'completed'
+    } else if (ev.type === 'final_decision') {
+      // final_decision is Risk Judge output, all risk debaters + judge completed
+      statusMap['Aggressive Analyst'] = 'completed'
+      statusMap['Conservative Analyst'] = 'completed'
+      statusMap['Neutral Analyst'] = 'completed'
+      statusMap['Risk Judge'] = 'completed'
     } else if (ev.type === 'completed') {
       taskCompleted = true
       // mark all still-running as completed

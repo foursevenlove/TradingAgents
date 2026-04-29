@@ -48,5 +48,12 @@
         TradingAgents - Multi-Agent LLM Financial Analysis Framework
       </div>
     </footer>
+
+    <!-- Global Toast Container -->
+    <Toast />
   </div>
 </template>
+
+<script setup>
+import Toast from './components/Toast.vue'
+</script>

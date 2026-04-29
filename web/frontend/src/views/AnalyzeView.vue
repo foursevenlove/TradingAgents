@@ -189,6 +189,7 @@ const status = ref('pending')
 const signal = ref('')
 const result = ref(null)
 const selectedAgent = ref('Market Analyst')  // Default to first analyst
+const userExplicitlySelected = ref(false)  // Track if user clicked to select
 const viewMode = ref('process')  // 'process' or 'report'
 const errorMsg = ref('')
 let cleanup = null
@@ -203,16 +204,18 @@ const judgeAgents = ['Research Manager', 'Risk Judge']
 const traderAgents = ['Trader']
 
 // Determine current phase based on selection or running agent
-// selectedAgent defaults to 'Market Analyst', so effectiveAgent always has a value
 const effectiveAgent = computed(() => {
-  // When running, follow the running agent (but keep selection if explicitly made)
+  // If user explicitly clicked to select an agent, respect their choice
+  if (userExplicitlySelected.value) {
+    return selectedAgent.value
+  }
+  // When running and user hasn't explicitly selected, follow the running agent
   const running = currentRunningAgent.value
-  const isCompleted = events.value.some(e => e.type === 'completed')
-  if (running && !isCompleted) {
-    // Only auto-switch to running agent during analysis
+  const isDone = events.value.some(e => e.type === 'completed')
+  if (running && !isDone) {
     return running
   }
-  // After completion or before start, use selected agent (defaults to Market Analyst)
+  // After completion, use selected agent (defaults to Market Analyst)
   return selectedAgent.value
 })
 
@@ -286,10 +289,12 @@ async function cancelAnalysis() {
 
 function onSelectAgent(agentName) {
   selectedAgent.value = agentName
+  userExplicitlySelected.value = true
 }
 
 function onClearSelection() {
   selectedAgent.value = ''
+  userExplicitlySelected.value = false
 }
 
 function handleEvent(event) {
@@ -300,10 +305,24 @@ function handleEvent(event) {
     status.value = 'running'
     if (event.data.ticker) ticker.value = event.data.ticker
     if (event.data.trade_date) tradeDate.value = event.data.trade_date
+    // Reset user selection when analysis starts
+    userExplicitlySelected.value = false
   }
   if (event.type === 'completed') {
     status.value = 'completed'
     taskStore.setStatus('completed')
+    // Reset user selection when analysis completes
+    userExplicitlySelected.value = false
+    // Load result data immediately when task completes via SSE
+    loadTaskInfo().then(() => {
+      // After loading status, also load result if available
+      api.getHistoryDetail(props.taskId).then(detail => {
+        if (detail?.result) {
+          result.value = detail.result
+          if (detail.signal) signal.value = detail.signal
+        }
+      }).catch(() => {})
+    })
   }
   if (event.type === 'failed') {
     status.value = 'failed'
