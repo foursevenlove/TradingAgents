@@ -8,6 +8,8 @@ from typing import Optional
 from croniter import croniter
 
 from .watchlist_manager import WatchlistManager
+from .holdings_router import get_holdings_manager
+from .holdings_manager import format_holdings_for_prompt
 from .task_manager import get_task_manager
 from .stream_adapter import start_analysis
 
@@ -153,12 +155,16 @@ class SchedulerService:
                 if max_risk_discuss_rounds is not None:
                     config_override["max_risk_discuss_rounds"] = max_risk_discuss_rounds
 
+                holding = get_holdings_manager().get_holding_by_ticker(ticker)
+                portfolio_holdings = format_holdings_for_prompt(holding)
+
                 await start_analysis(
                     task_id=task_id,
                     ticker=ticker,
                     trade_date=trade_date,
                     analysts=analysts,
                     config_override=config_override if config_override else None,
+                    portfolio_holdings=portfolio_holdings,
                 )
 
                 # Wait for completion by polling

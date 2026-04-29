@@ -13,6 +13,7 @@ from fastapi.responses import FileResponse, JSONResponse
 from .router import router
 from .config import WEB_CONFIG
 from .watchlist_router import router as watchlist_router, init_watchlist_manager
+from .holdings_router import router as holdings_router, init_holdings_manager
 from .scheduler_service import create_scheduler, get_scheduler
 from .exceptions import TradingAgentsError, classify_exception, ErrorResponse
 from .logging_config import setup_logging, get_server_logger, log_exception, log_api_request
@@ -49,6 +50,7 @@ async def lifespan(app: FastAPI):
 
     wm = init_watchlist_manager()
     wm.recover_running_batches()
+    init_holdings_manager()
 
     scheduler = create_scheduler(wm)
     await scheduler.start()
@@ -137,6 +139,7 @@ def create_app() -> FastAPI:
     # Mount API routers
     app.include_router(router)
     app.include_router(watchlist_router)
+    app.include_router(holdings_router)
 
     # Serve frontend static files if built
     frontend_dist = Path(WEB_CONFIG["frontend_dist"])

@@ -262,4 +262,34 @@ export const api = {
   },
   getBatchRuns: (limit = 50, offset = 0) => get(`/api/batch/runs?limit=${limit}&offset=${offset}`),
   getBatchRun: (batchId) => get(`/api/batch/runs/${batchId}`),
+
+  // ── Holdings (持仓) ──────────────────────────────────────────
+  getHoldings: () => get('/api/holdings'),
+  addHolding: async (ticker, name, quantity, costPrice, notes = '') => {
+    try {
+      const result = await post('/api/holdings', { ticker, name, quantity, cost_price: costPrice, notes })
+      showInfo(`已添加 ${ticker} 持仓`)
+      return result
+    } catch (e) {
+      throw e
+    }
+  },
+  updateHolding: async (id, quantity, costPrice, notes = '') => {
+    try {
+      const result = await put(`/api/holdings/${id}`, { quantity, cost_price: costPrice, notes })
+      showInfo('持仓已更新')
+      return result
+    } catch (e) {
+      throw e
+    }
+  },
+  removeHolding: async (id) => {
+    try {
+      const result = await del(`/api/holdings/${id}`)
+      showInfo('持仓已删除')
+      return result
+    } catch (e) {
+      throw e
+    }
+  },
 }

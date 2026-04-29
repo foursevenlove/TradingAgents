@@ -35,12 +35,12 @@ class WatchlistManager:
                 )
             """)
 
-            # Schedule config table (single row)
+            # Schedule config table (single row) - 默认每天 09:00 执行
             conn.execute("""
                 CREATE TABLE IF NOT EXISTS schedule (
                     id INTEGER PRIMARY KEY CHECK (id = 1),
                     enabled INTEGER DEFAULT 0,
-                    cron_expression TEXT NOT NULL DEFAULT '0 9 * * 1-5',
+                    cron_expression TEXT NOT NULL DEFAULT '0 9 * * *',
                     next_run_at TEXT,
                     last_run_at TEXT,
                     max_concurrency INTEGER DEFAULT 2,
@@ -71,12 +71,12 @@ class WatchlistManager:
             except sqlite3.OperationalError:
                 pass  # column already exists
 
-            # Initialize default schedule row
+            # Initialize default schedule row (每天 09:00 执行)
             now = datetime.utcnow().isoformat() + "Z"
             existing = conn.execute("SELECT id FROM schedule WHERE id = 1").fetchone()
             if not existing:
                 conn.execute(
-                    "INSERT INTO schedule (id, enabled, cron_expression, max_concurrency, config, created_at, updated_at) VALUES (1, 0, '0 9 * * 1-5', 2, '{}', ?, ?)",
+                    "INSERT INTO schedule (id, enabled, cron_expression, max_concurrency, config, created_at, updated_at) VALUES (1, 0, '0 9 * * *', 2, '{}', ?, ?)",
                     (now, now),
                 )
 

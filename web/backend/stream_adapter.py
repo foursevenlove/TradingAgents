@@ -162,12 +162,14 @@ class AnalysisRunner:
         trade_date: str,
         analysts: list = None,
         config_override: Optional[Dict[str, Any]] = None,
+        portfolio_holdings: str = "",
     ):
         self.task_id = task_id
         self.ticker = ticker
         self.trade_date = trade_date
         self.analysts = analysts or ["market", "social", "news", "fundamentals"]
         self.config = self._build_config(config_override)
+        self.portfolio_holdings = portfolio_holdings
         self.queue: asyncio.Queue = asyncio.Queue()
         self.state: Dict[str, Any] = {}
         self._cancelled = False
@@ -210,7 +212,7 @@ class AnalysisRunner:
                     config=self.config,
                 )
                 init_state = graph.propagator.create_initial_state(
-                    self.ticker, self.trade_date
+                    self.ticker, self.trade_date, self.portfolio_holdings
                 )
                 stream_config = {"recursion_limit": self.config.get("max_recur_limit", 100)}
 
@@ -633,8 +635,9 @@ async def start_analysis(
     trade_date: str,
     analysts: list = None,
     config_override: Optional[Dict[str, Any]] = None,
+    portfolio_holdings: str = "",
 ) -> AnalysisRunner:
-    runner = AnalysisRunner(task_id, ticker, trade_date, analysts, config_override)
+    runner = AnalysisRunner(task_id, ticker, trade_date, analysts, config_override, portfolio_holdings)
     _runners[task_id] = runner
     asyncio.create_task(runner.run())
     return runner

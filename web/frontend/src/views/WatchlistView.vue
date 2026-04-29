@@ -109,7 +109,7 @@
     <!-- Schedule config -->
     <div class="bg-white rounded-xl border border-gray-200 p-6 mt-6">
       <h2 class="text-lg font-semibold text-gray-900 mb-4">定时批量分析</h2>
-      <div class="grid grid-cols-1 md:grid-cols-3 gap-4">
+      <div class="grid grid-cols-1 md:grid-cols-4 gap-4">
         <div>
           <label class="block text-xs font-medium text-gray-500 mb-1">启用定时</label>
           <input type="checkbox" v-model="scheduleForm.enabled" class="w-4 h-4 text-primary-600 rounded" />
@@ -118,17 +118,26 @@
           <label class="block text-xs font-medium text-gray-500 mb-1">执行时间</label>
           <select
             v-model="scheduleForm.schedule_option"
+            @change="onScheduleOptionChange"
             class="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-primary-500"
           >
+            <option value="everyday">每天（自定义时间）</option>
+            <option value="weekday">工作日（自定义时间）</option>
             <option value="everyday_9am">每天 09:00（开盘前）</option>
             <option value="everyday_3pm">每天 15:00（收盘后）</option>
             <option value="weekday_9am">工作日 09:00（周一至周五）</option>
             <option value="weekday_3pm">工作日 15:00（周一至周五）</option>
             <option value="monday_9am">每周一 09:00</option>
             <option value="friday_3pm">每周五 15:00</option>
-            <option value="every_30min">每 30 分钟</option>
-            <option value="every_1hour">每 1 小时</option>
           </select>
+        </div>
+        <div v-if="scheduleForm.schedule_option === 'everyday' || scheduleForm.schedule_option === 'weekday'">
+          <label class="block text-xs font-medium text-gray-500 mb-1">自定义时间</label>
+          <input
+            type="time"
+            v-model="scheduleForm.custom_time"
+            class="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-primary-500"
+          />
         </div>
         <div>
           <label class="block text-xs font-medium text-gray-500 mb-1">最大并发数</label>
@@ -144,6 +153,57 @@
           </select>
         </div>
       </div>
+
+      <!-- Analysis depth config -->
+      <div class="mt-4 border-t border-gray-100 pt-4">
+        <h3 class="text-sm font-medium text-gray-700 mb-3">分析深度配置</h3>
+        <div class="grid grid-cols-1 md:grid-cols-3 gap-4">
+          <div>
+            <label class="block text-xs font-medium text-gray-500 mb-1">辩论轮数</label>
+            <select
+              v-model.number="scheduleForm.max_debate_rounds"
+              class="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-primary-500"
+            >
+              <option :value="1">1轮（快速）</option>
+              <option :value="2">2轮（标准）</option>
+              <option :value="3">3轮（深入）</option>
+            </select>
+          </div>
+          <div>
+            <label class="block text-xs font-medium text-gray-500 mb-1">风险讨论轮数</label>
+            <select
+              v-model.number="scheduleForm.max_risk_discuss_rounds"
+              class="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-primary-500"
+            >
+              <option :value="1">1轮（快速）</option>
+              <option :value="2">2轮（标准）</option>
+              <option :value="3">3轮（深入）</option>
+            </select>
+          </div>
+          <div>
+            <label class="block text-xs font-medium text-gray-500 mb-1">分析师</label>
+            <div class="flex flex-wrap gap-2 mt-1">
+              <label class="inline-flex items-center">
+                <input type="checkbox" v-model="scheduleForm.analysts_set" value="market" class="w-3 h-3 text-primary-600 rounded" />
+                <span class="text-xs text-gray-600 ml-1">市场</span>
+              </label>
+              <label class="inline-flex items-center">
+                <input type="checkbox" v-model="scheduleForm.analysts_set" value="social" class="w-3 h-3 text-primary-600 rounded" />
+                <span class="text-xs text-gray-600 ml-1">舆情</span>
+              </label>
+              <label class="inline-flex items-center">
+                <input type="checkbox" v-model="scheduleForm.analysts_set" value="news" class="w-3 h-3 text-primary-600 rounded" />
+                <span class="text-xs text-gray-600 ml-1">新闻</span>
+              </label>
+              <label class="inline-flex items-center">
+                <input type="checkbox" v-model="scheduleForm.analysts_set" value="fundamentals" class="w-3 h-3 text-primary-600 rounded" />
+                <span class="text-xs text-gray-600 ml-1">基本面</span>
+              </label>
+            </div>
+          </div>
+        </div>
+      </div>
+
       <div class="mt-4 flex items-center gap-4">
         <button
           @click="saveSchedule"
@@ -185,8 +245,12 @@ const saveMsg = ref('')
 
 const scheduleForm = ref({
   enabled: false,
-  schedule_option: 'weekday_9am',
+  schedule_option: 'everyday_9am',
+  custom_time: '09:00',
   max_concurrency: 2,
+  max_debate_rounds: 2,
+  max_risk_discuss_rounds: 2,
+  analysts_set: ['market', 'social', 'news', 'fundamentals'],
 })
 
 // 选项到 cron 表达式的映射
@@ -197,8 +261,7 @@ const SCHEDULE_TO_CRON = {
   'weekday_3pm': '0 15 * * 1-5',      // 工作日 15:00
   'monday_9am': '0 9 * * 1',          // 每周一 9:00
   'friday_3pm': '0 15 * * 5',         // 每周五 15:00
-  'every_30min': '*/30 * * * *',      // 每 30 分钟
-  'every_1hour': '0 * * * *',         // 每小时
+  // 自定义时间选项会在 saveSchedule 时动态生成
 }
 
 // cron 表达式到选项的反向映射
@@ -209,8 +272,6 @@ const CRON_TO_SCHEDULE = {
   '0 15 * * 1-5': 'weekday_3pm',
   '0 9 * * 1': 'monday_9am',
   '0 15 * * 5': 'friday_3pm',
-  '*/30 * * * *': 'every_30min',
-  '0 * * * *': 'every_1hour',
 }
 
 let searchTimeout = null
@@ -222,10 +283,34 @@ onMounted(async () => {
   scheduleForm.value.enabled = store.schedule.enabled
   scheduleForm.value.max_concurrency = store.schedule.max_concurrency
 
-  // 把 cron 表达式映射到选项
+  // 从 config 加载分析深度配置
+  const config = store.schedule.config || {}
+  scheduleForm.value.max_debate_rounds = config.max_debate_rounds || 2
+  scheduleForm.value.max_risk_discuss_rounds = config.max_risk_discuss_rounds || 2
+  scheduleForm.value.analysts_set = config.analysts || ['market', 'social', 'news', 'fundamentals']
+
+  // 解析 cron 表达式映射到选项和时间
   const cron = store.schedule.cron_expression
-  scheduleForm.value.schedule_option = CRON_TO_SCHEDULE[cron] || 'weekday_9am'
+  if (CRON_TO_SCHEDULE[cron]) {
+    scheduleForm.value.schedule_option = CRON_TO_SCHEDULE[cron]
+  } else {
+    // 尝试解析自定义时间
+    const match = cron.match(/^(\d+) (\d+) \* \* (\*|1-5)$/)
+    if (match) {
+      const minute = match[1]
+      const hour = match[2]
+      const weekday = match[3] === '1-5'
+      scheduleForm.value.schedule_option = weekday ? 'weekday' : 'everyday'
+      scheduleForm.value.custom_time = `${hour.padStart(2, '0')}:${minute.padStart(2, '0')}`
+    } else {
+      scheduleForm.value.schedule_option = 'everyday_9am'
+    }
+  }
 })
+
+function onScheduleOptionChange() {
+  // 当切换到自定义时间时，默认使用当前设置的时间
+}
 
 async function onSearchInput() {
   // Debounce search
@@ -279,11 +364,35 @@ async function removeStock(id) {
 async function saveSchedule() {
   saveMsg.value = '保存中...'
   try {
-    const cron_expression = SCHEDULE_TO_CRON[scheduleForm.value.schedule_option] || '0 9 * * 1-5'
+    let cron_expression
+    const option = scheduleForm.value.schedule_option
+
+    if (option === 'everyday' || option === 'weekday') {
+      // 自定义时间：解析 HH:MM 格式
+      const [hour, minute] = scheduleForm.value.custom_time.split(':').map(Number)
+      if (option === 'everyday') {
+        cron_expression = `${minute} ${hour} * * *`
+      } else {
+        cron_expression = `${minute} ${hour} * * 1-5`
+      }
+    } else {
+      cron_expression = SCHEDULE_TO_CRON[option] || '0 9 * * *'
+    }
+
+    // 确保至少选择一个分析师
+    const analysts = scheduleForm.value.analysts_set.length > 0
+      ? scheduleForm.value.analysts_set
+      : ['market', 'social', 'news', 'fundamentals']
+
     await store.updateSchedule({
       enabled: scheduleForm.value.enabled,
       cron_expression,
       max_concurrency: scheduleForm.value.max_concurrency,
+      config: {
+        max_debate_rounds: scheduleForm.value.max_debate_rounds,
+        max_risk_discuss_rounds: scheduleForm.value.max_risk_discuss_rounds,
+        analysts,
+      },
     })
     saveMsg.value = '✓ 配置已保存'
     setTimeout(() => { saveMsg.value = '' }, 2000)

@@ -5,7 +5,7 @@ export const watchlistStore = reactive({
   stocks: [],
   schedule: {
     enabled: false,
-    cron_expression: '0 9 * * 1-5',
+    cron_expression: '0 9 * * *',
     max_concurrency: 2,
     config: {},
     next_run_at: null,

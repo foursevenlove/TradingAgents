@@ -16,6 +16,8 @@ from .models import (
 )
 from .task_manager import get_task_manager
 from .stream_adapter import start_analysis, get_runner
+from .holdings_router import get_holdings_manager
+from .holdings_manager import format_holdings_for_prompt
 from .config import WEB_CONFIG
 
 router = APIRouter()
@@ -44,12 +46,16 @@ async def analyze_start(req: AnalyzeRequest):
         },
     )
 
+    holding = get_holdings_manager().get_holding_by_ticker(req.ticker)
+    portfolio_holdings = format_holdings_for_prompt(holding)
+
     await start_analysis(
         task_id=task_id,
         ticker=req.ticker,
         trade_date=trade_date,
         analysts=req.analysts,
         config_override=config if config else None,
+        portfolio_holdings=portfolio_holdings,
     )
 
     return {"task_id": task_id, "status": TaskStatus.RUNNING.value}

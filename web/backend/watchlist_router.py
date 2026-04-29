@@ -47,7 +47,7 @@ class UpdateStockRequest(BaseModel):
 
 class ScheduleUpdateRequest(BaseModel):
     enabled: bool = Field(..., description="是否启用定时")
-    cron_expression: str = Field("0 9 * * 1-5", description="Cron 表达式")
+    cron_expression: str = Field("0 9 * * *", description="Cron 表达式")
     max_concurrency: int = Field(2, ge=1, le=5, description="最大并发数")
     config: dict = Field(default_factory=dict, description="分析配置覆盖")
 
