@@ -92,6 +92,7 @@ def get_global_news(
     curr_date: Optional[str] = None,
     look_back_days: Optional[int] = None,
     limit: Optional[int] = None,
+    ticker: Optional[str] = None,
 ) -> str:
     """Get global financial news relevant to A-share market.
 

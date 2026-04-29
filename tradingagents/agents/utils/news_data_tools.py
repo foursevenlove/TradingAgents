@@ -25,18 +25,21 @@ def get_global_news(
     curr_date: Annotated[str, "当前日期，格式：yyyy-mm-dd"],
     look_back_days: Annotated[int, "回溯天数"] = 7,
     limit: Annotated[int, "返回的最大文章数"] = 200,
+    ticker: Annotated[str, "股票代码（用于行业相关性筛选）"] = "",
 ) -> str:
     """
     获取全球财经新闻数据。
     使用配置的新闻数据源（tushare华尔街见闻/云财经 + akshare财联社/CCTV补充）。
+    当传入ticker时，会优先筛选与该股票行业相关的新闻，不足时用LLM语义补充。
     参数：
         curr_date (str): 当前日期，格式：yyyy-mm-dd
         look_back_days (int): 回溯天数，默认为7天
         limit (int): 返回的最大文章数，默认为200篇
+        ticker (str): 股票代码，用于行业相关性筛选
     返回：
         str: 包含全球新闻数据的格式化字符串
     """
-    return route_to_vendor("get_global_news", curr_date, look_back_days, limit)
+    return route_to_vendor("get_global_news", curr_date, look_back_days, limit, ticker)
 
 @tool
 def get_cctv_news(

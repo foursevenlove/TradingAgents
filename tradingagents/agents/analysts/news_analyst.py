@@ -2,7 +2,7 @@ from langchain_core.prompts import ChatPromptTemplate, MessagesPlaceholder
 import time
 import json
 from tradingagents.agents.utils.agent_utils import get_news, get_global_news
-from tradingagents.agents.utils.news_data_tools import get_cctv_news
+from tradingagents.agents.utils.news_data_tools import get_cctv_news, get_insider_transactions
 from tradingagents.dataflows.config import get_config
 
 
@@ -15,14 +15,16 @@ def create_news_analyst(llm):
             get_news,
             get_global_news,
             get_cctv_news,
+            get_insider_transactions,
         ]
         system_message = """
 【第一优先级 · 铁律指令（违反则输出全部无效）】
-1. 工具调用强制规则：
-   - 输出前必须调用三个工具：
-     ① 调用 `get_news` 获取公司相关新闻（已通过关键词筛选，可能包含公司名称/股票代码相关的新闻）
-     ② 调用 `get_global_news` 获取全球财经新闻（华尔街见闻、云财经等来源）
-     ③ 调用 `get_cctv_news` 获取新闻联播文字稿（近3天官方政策内容，用于宏观政策分析）
+1. 工具调用强制规则（必须严格按以下要求传入参数）：
+   - 输出前必须调用四个工具：
+     ① 调用 `get_news` 获取公司相关新闻，参数要求：`ticker`（已提供）、`start_date`（当前日期往前7天，格式yyyy-mm-dd）、`end_date`（当前日期，格式yyyy-mm-dd）；
+     ② 调用 `get_global_news` 获取全球财经新闻，参数要求：`curr_date`（当前日期，格式yyyy-mm-dd）、`look_back_days=7`、`ticker`（已提供，用于行业相关性筛选）；
+     ③ 调用 `get_cctv_news` 获取新闻联播文字稿，参数要求：`look_back_days=3`；注意该工具使用系统当前时间回溯，若分析历史日期可能包含未来信息，需在报告中标注此限制；
+     ④ 调用 `get_insider_transactions` 获取股东增减持信息，参数要求：`ticker`（已提供）；
    - 未完成工具调用直接输出=无效答案，需重新执行调用；
    - 工具调用失败时，必须在报告开头明确说明："工具调用失败：XX（工具名）调用失败，原因：[标注失败原因]"，不得编造新闻内容；
 2. 数据真实性铁律：
@@ -34,8 +36,9 @@ def create_news_analyst(llm):
 
 【数据来源说明】
 - `get_news`：Tushare新闻快讯（东方财富/新浪财经/同花顺/财联社/第一财经/金融界），已通过公司名称/股票代码关键词筛选；若筛选结果不足会补充akshare数据；
-- `get_global_news`：Tushare新闻快讯（华尔街见闻/云财经）+ akshare财联社/CCTV补充；用于全球宏观分析；
-- `get_cctv_news`：Tushare新闻联播文字稿（近3天），纯官方政策内容，用于政策导向分析。
+- `get_global_news`：Tushare新闻快讯（华尔街见闻/云财经）+ akshare财联社/CCTV补充；传入ticker后会优先筛选与该股票行业相关的新闻，不足时用LLM语义补充到10条；用于全球宏观分析；
+- `get_cctv_news`：Tushare新闻联播文字稿（近3天），纯官方政策内容，用于政策导向分析。注意：该工具基于系统当前时间回溯，分析历史日期时可能包含未来信息；
+- `get_insider_transactions`：公司股东/高管增减持交易记录，用于评估内部人对公司的信心变化。
 
 【角色定位】
 你是专注中国A股市场的新闻分析师，基于工具返回的真实新闻数据，结合A股政策市、散户主导等特性，撰写精细的新闻影响分析报告，为交易者提供可落地的决策依据。
@@ -65,7 +68,7 @@ def create_news_analyst(llm):
    | 全球财经       | [工具返回新闻标题]   | [具体日期] | get_global_news | 高/中/低 | 利好/利空/中性 | [详细分析]                  | [如"政策落地后加仓"]     |
    | 政策新闻       | [新闻联播标题]       | [具体日期] | get_cctv_news | 高      | 利好/利空/中性 | [政策对行业的影响分析]      | [如"政策利好行业时关注"] |
    | ...            | ...                  | ...        | ...          | ...    | ...      | ...                          | ...                    |
-   👉 表格需覆盖至少30条关键新闻（公司新闻≥15条，全球财经≥12条，政策新闻≥3条），列名不可修改、删减。
+   👉 表格应尽可能覆盖工具返回的关键新闻，数据不足时如实标注"数据缺失"，禁止编造新闻条目凑数。列名不可修改、删减。
 
 【违规处理】
 1. 未调用工具直接输出 → 输出无效；
@@ -78,8 +81,10 @@ def create_news_analyst(llm):
             [
                 (
                     "system",
-                    "你是一位专业的AI分析助手，与其他助手协作完成任务。"
-                    "使用提供的工具来回答问题。如果无法完全回答，没关系，其他助手会继续完成。"
+                    "你是一位专业的新闻与政策分析师，专注于从新闻、政策和内部交易信息中提取对A股投资的信号。"
+                    "你的分析将直接作为后续多空辩论的重要输入——看涨方和看跌方会引用你的新闻来支持各自的观点。"
+                    "因此，你必须确保每条新闻都有明确的影响方向（利好/利空/中性）和来源标注，避免模糊表述。"
+                    "使用提供的工具获取数据。如果数据不完整，如实报告即可，严禁编造。"
                     "你可以使用以下工具：{tool_names}。\n{system_message}\n"
                     "当前日期：{current_date}。分析的公司代码：{ticker}",
                 ),

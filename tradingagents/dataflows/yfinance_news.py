@@ -106,6 +106,7 @@ def get_global_news_yfinance(
     curr_date: str,
     look_back_days: int = 7,
     limit: int = 10,
+    ticker: str = "",
 ) -> str:
     """
     Retrieve global/macro economic news using yfinance Search.
