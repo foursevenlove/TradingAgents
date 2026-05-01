@@ -1,12 +1,19 @@
 """Akshare news data implementation for A-share market."""
 
 import re
-from datetime import datetime
+from datetime import datetime, timedelta
 from typing import Annotated, Optional
 import akshare as ak
 import pandas as pd
 
 from .akshare_common import _convert_ticker_format, _format_to_csv, AkshareDataError
+
+# Industry classification for keyword expansion
+try:
+    from tradingagents.market_data.industry_classification import get_sw_industry
+    INDUSTRY_AVAILABLE = True
+except ImportError:
+    INDUSTRY_AVAILABLE = False
 
 
 def _parse_date_from_url(url: str) -> Optional[datetime]:
@@ -188,3 +195,118 @@ def get_insider_transactions(
 
     except Exception as e:
         raise AkshareDataError(f"Failed to get insider transactions for {ticker}: {str(e)}")
+
+
+def get_company_news(
+    ticker: Annotated[str, "A-share ticker symbol (e.g., 000001.SZ, 600000.SH)"],
+    start_date: Optional[str] = None,
+    end_date: Optional[str] = None,
+) -> str:
+    """第一层 fallback：akshare 公司新闻。
+
+    委托给现有 get_news()，功能不变。
+    """
+    return get_news(ticker, start_date, end_date)
+
+
+def get_industry_news(
+    ticker: Annotated[str, "A-share ticker symbol"],
+    start_date: Optional[str] = None,
+    end_date: Optional[str] = None,
+) -> str:
+    """第二层 fallback：akshare 行业/产业链新闻。
+
+    调用 ak.stock_info_global_cls()，通过行业关键词过滤，
+    返回最多 20 条（fallback 层不做 LLM 摘要）。
+    """
+    try:
+        # 获取行业分类
+        industry_info = {}
+        if INDUSTRY_AVAILABLE:
+            try:
+                industry_info = get_sw_industry(ticker) or {}
+            except Exception:
+                pass
+
+        level_1 = industry_info.get('level_1', '')
+        level_2 = industry_info.get('level_2', '')
+        industry_keywords = [kw for kw in [level_1, level_2] if kw and kw != '未知']
+        industry_context = ' / '.join(industry_keywords) if industry_keywords else '未知行业'
+
+        # 财联社全球财经新闻
+        df = ak.stock_info_global_cls()
+        if df.empty:
+            return f"# 第二层 · 产业链/行业新闻 ({ticker}) — akshare fallback\n# No industry news available from akshare\n"
+
+        # 重命名列
+        df = df.rename(columns={
+            "标题": "title",
+            "内容": "content",
+            "发布日期": "Date",
+            "发布时间": "Time",
+        })
+        df['data_source'] = 'akshare_cls'
+
+        # 行业关键词过滤
+        if industry_keywords:
+            keywords_lower = [k.lower() for k in industry_keywords]
+            mask = df.apply(
+                lambda r: any(kw in str(r.get('title', '')).lower() + str(r.get('content', '')).lower()
+                             for kw in keywords_lower),
+                axis=1
+            )
+            filtered = df[mask]
+        else:
+            filtered = df
+
+        # 最多 20 条
+        final_df = filtered.head(20)
+
+        header = f"# 第二层 · 产业链/行业新闻 ({ticker}) — akshare fallback\n"
+        header += f"# Industry: {industry_context}\n"
+        header += f"# Total: {len(df)} | Filtered: {len(filtered)} | Final: {len(final_df)}\n"
+        header += f"# Note: Fallback data, no LLM summarization\n"
+
+        return _format_to_csv(final_df, header)
+
+    except Exception as e:
+        return f"# 第二层 · 产业链/行业新闻 ({ticker}) — akshare fallback\n# Error: {str(e)}\n"
+
+
+def get_policy_news(
+    ticker: Annotated[str, "A-share ticker symbol"],
+    look_back_days: Annotated[int, "回溯天数"] = 3,
+) -> str:
+    """第三层 fallback：akshare 政策新闻。
+
+    调用 ak.news_cctv() 返回全量（fallback 层不做 LLM 筛选）。
+    """
+    try:
+        all_cctv = []
+        today = datetime.now()
+
+        for i in range(look_back_days):
+            date = today - timedelta(days=i)
+            date_str = date.strftime("%Y%m%d")
+            try:
+                df = ak.news_cctv(date=date_str)
+                if not df.empty:
+                    df['retrieved_date'] = date.strftime("%Y-%m-%d")
+                    all_cctv.append(df)
+            except Exception:
+                continue
+
+        if not all_cctv:
+            return f"# 第三层 · 政策新闻 ({ticker}) — akshare fallback\n# No CCTV data available\n"
+
+        merged = pd.concat(all_cctv, ignore_index=True)
+
+        header = f"# 第三层 · 政策新闻 ({ticker}) — akshare fallback\n"
+        header += f"# Date range: {(today - timedelta(days=look_back_days-1)).strftime('%Y-%m-%d')} to {today.strftime('%Y-%m-%d')}\n"
+        header += f"# Total items: {len(merged)}\n"
+        header += f"# Note: Fallback data, no LLM filtering\n"
+
+        return _format_to_csv(merged, header)
+
+    except Exception as e:
+        return f"# 第三层 · 政策新闻 ({ticker}) — akshare fallback\n# Error: {str(e)}\n"

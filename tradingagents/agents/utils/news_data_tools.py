@@ -69,3 +69,63 @@ def get_insider_transactions(
         str: 内部交易数据报告
     """
     return route_to_vendor("get_insider_transactions", ticker)
+
+
+@tool
+def get_company_news(
+    ticker: Annotated[str, "股票代码"],
+    start_date: Annotated[str, "开始日期，格式：yyyy-mm-dd"] = None,
+    end_date: Annotated[str, "结束日期，格式：yyyy-mm-dd"] = None,
+) -> str:
+    """
+    第一层：获取公司直接相关新闻。
+    调用 tushare news API（6源分段拉取）+ akshare stock_news_em，
+    通过公司名+股票代码关键词筛选，最多返回 20 条。
+    已预过滤，结果均为与公司直接相关的新闻快讯。
+    参数：
+        ticker (str): 股票代码
+        start_date (str): 开始日期，格式：yyyy-mm-dd，默认3天前
+        end_date (str): 结束日期，格式：yyyy-mm-dd，默认当天
+    返回：
+        str: 包含公司直接相关新闻的格式化字符串（CSV格式）
+    """
+    return route_to_vendor("get_company_news", ticker, start_date, end_date)
+
+
+@tool
+def get_industry_news(
+    ticker: Annotated[str, "股票代码"],
+    start_date: Annotated[str, "开始日期，格式：yyyy-mm-dd"] = None,
+    end_date: Annotated[str, "结束日期，格式：yyyy-mm-dd"] = None,
+) -> str:
+    """
+    第二层：获取产业链/行业间接相关新闻。
+    调用 tushare major_news（长篇通讯，12h分段）+ akshare 财联社，
+    通过行业关键词初筛 → LLM 精选 20 条 → LLM 生成 200-300 字摘要。
+    覆盖上下游产业链、竞争对手、行业趋势等间接相关信息。
+    参数：
+        ticker (str): 股票代码
+        start_date (str): 开始日期，格式：yyyy-mm-dd，默认3天前
+        end_date (str): 结束日期，格式：yyyy-mm-dd，默认当天
+    返回：
+        str: 包含产业链/行业新闻的格式化字符串（CSV格式，含summary列）
+    """
+    return route_to_vendor("get_industry_news", ticker, start_date, end_date)
+
+
+@tool
+def get_policy_news(
+    ticker: Annotated[str, "股票代码"],
+    look_back_days: Annotated[int, "回溯天数，默认3天"] = 3,
+) -> str:
+    """
+    第三层：获取政策/宏观新闻。
+    调用 tushare cctv_news API，拉取新闻联播文字稿，
+    通过 LLM 筛选与目标股票行业相关的政策条目。
+    参数：
+        ticker (str): 股票代码
+        look_back_days (int): 回溯天数，默认为3天
+    返回：
+        str: 包含政策新闻的格式化字符串（CSV格式）
+    """
+    return route_to_vendor("get_policy_news", ticker, look_back_days)

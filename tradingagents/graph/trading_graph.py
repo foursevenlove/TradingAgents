@@ -32,6 +32,9 @@ from tradingagents.agents.utils.agent_utils import (
     get_news,
     get_insider_transactions,
     get_global_news,
+    get_company_news,
+    get_industry_news,
+    get_policy_news,
     # A-share specific market indicators
     get_north_bound_flow,
     get_margin_trading,
@@ -210,12 +213,12 @@ class TradingAgentsGraph:
             ),
             "news": ToolNode(
                 [
-                    # News and insider information
-                    get_news,
-                    get_global_news,
+                    # 三层新闻架构
+                    get_company_news,
+                    get_industry_news,
+                    get_policy_news,
+                    # Insider information
                     get_insider_transactions,
-                    # Macro policy news (CCTV news broadcast)
-                    get_cctv_news,
                 ]
             ),
             "fundamentals": ToolNode(

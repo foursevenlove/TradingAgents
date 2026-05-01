@@ -35,6 +35,9 @@ from .akshare import (
     get_news as get_akshare_news,
     get_global_news as get_akshare_global_news,
     get_insider_transactions as get_akshare_insider_transactions,
+    get_company_news as get_akshare_company_news,
+    get_industry_news as get_akshare_industry_news,
+    get_policy_news as get_akshare_policy_news,
     # A-share specific indicators
     get_north_bound_flow as get_akshare_north_bound_flow,
     get_margin_trading as get_akshare_margin_trading,
@@ -59,6 +62,9 @@ from .tushare_news import (
     get_global_news as get_tushare_global_news,
     get_cctv_news as get_tushare_cctv_news,
     get_insider_transactions as get_tushare_insider_transactions,
+    get_company_news as get_tushare_company_news,
+    get_industry_news as get_tushare_industry_news,
+    get_policy_news as get_tushare_policy_news,
     TushareDataError,
 )
 
@@ -104,13 +110,11 @@ TOOLS_CATEGORIES = {
         "tools": [
             "get_news",
             "get_global_news",
-            "get_insider_transactions",
-        ]
-    },
-    "macro_policy_news": {
-        "description": "Macro policy news (CCTV news broadcast transcripts)",
-        "tools": [
+            "get_company_news",
+            "get_industry_news",
+            "get_policy_news",
             "get_cctv_news",
+            "get_insider_transactions",
         ]
     },
     "ashare_market_indicators": {
@@ -204,7 +208,20 @@ VENDOR_METHODS = {
         "alpha_vantage": get_alpha_vantage_insider_transactions,
         "yfinance": get_yfinance_insider_transactions,
     },
-    # macro_policy_news
+    # 三层新闻架构
+    "get_company_news": {
+        "akshare": get_akshare_company_news,
+        "tushare": get_tushare_company_news,
+    },
+    "get_industry_news": {
+        "akshare": get_akshare_industry_news,
+        "tushare": get_tushare_industry_news,
+    },
+    "get_policy_news": {
+        "akshare": get_akshare_policy_news,
+        "tushare": get_tushare_policy_news,
+    },
+    # macro_policy_news (backward compat)
     "get_cctv_news": {
         "tushare": get_tushare_cctv_news,
     },
@@ -278,7 +295,7 @@ def route_to_vendor(method: str, *args, **kwargs):
             fallback_vendors.append(vendor)
 
     # Special handling for news methods with tushare keyword filtering + akshare fallback
-    if method in ["get_news", "get_global_news"]:
+    if method in ["get_news", "get_global_news", "get_company_news", "get_industry_news", "get_policy_news"]:
         tushare_result = None
         akshare_result = None
 

@@ -17,7 +17,10 @@ from tradingagents.agents.utils.fundamental_data_tools import (
 from tradingagents.agents.utils.news_data_tools import (
     get_news,
     get_insider_transactions,
-    get_global_news
+    get_global_news,
+    get_company_news,
+    get_industry_news,
+    get_policy_news,
 )
 from tradingagents.agents.utils.ashare_market_tools import (
     get_north_bound_flow,
