@@ -1,0 +1,72 @@
+version: "3.8"
+
+# TradingAgents 生产环境部署配置
+# 从阿里云镜像仓库拉取镜像，不使用本地构建
+
+services:
+  tradingagents:
+    # 从阿里云拉取镜像
+    image: registry.cn-shanghai.aliyuncs.com/foursevenlove/tradingagents:latest
+    container_name: tradingagents-web
+    restart: unless-stopped
+    ports:
+      - "${TRADINGAGENTS_PORT:-8000}:8000"
+    environment:
+      # LLM Provider API Keys (从 .env 文件读取)
+      - MINIMAX_API_KEY=${MINIMAX_API_KEY:-}
+      - DASHSCOPE_API_KEY=${DASHSCOPE_API_KEY:-}
+      - ALIBABA_API_KEY=${ALIBABA_API_KEY:-}
+      - OPENAI_API_KEY=${OPENAI_API_KEY:-}
+      - GOOGLE_API_KEY=${GOOGLE_API_KEY:-}
+      - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY:-}
+      - XAI_API_KEY=${XAI_API_KEY:-}
+      - OPENROUTER_API_KEY=${OPENROUTER_API_KEY:-}
+      # Tushare Token (required for A-share data)
+      - TUSHARE_TOKEN=${TUSHARE_TOKEN:-}
+      # Web configuration
+      - TRADINGAGENTS_WEB_HOST=0.0.0.0
+      - TRADINGAGENTS_WEB_PORT=8000
+      - TRADINGAGENTS_WEB_DB=/app/data/tasks.db
+      - TRADINGAGENTS_WEB_LOG_DIR=/app/logs
+      # CORS configuration (comma-separated origins)
+      - TRADINGAGENTS_CORS_ORIGINS=${TRADINGAGENTS_CORS_ORIGINS:-}
+      # Optional API key for authentication
+      - TRADINGAGENTS_API_KEY=${TRADINGAGENTS_API_KEY:-}
+    volumes:
+      # Persist database
+      - tradingagents_data:/app/data
+      # Persist logs
+      - tradingagents_logs:/app/logs
+      # Persist analysis reports and results
+      - tradingagents_reports:/app/reports
+      - tradingagents_results:/app/results
+      # Persist cache
+      - tradingagents_cache:/app/data_cache
+    # Resource limits (adjust based on your system)
+    deploy:
+      resources:
+        limits:
+          cpus: "2"
+          memory: 4G
+        reservations:
+          cpus: "0.5"
+          memory: 1G
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 15s
+    # Logging configuration
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "50m"
+        max-file: "10"
+
+volumes:
+  tradingagents_data:
+  tradingagents_logs:
+  tradingagents_reports:
+  tradingagents_results:
+  tradingagents_cache:
