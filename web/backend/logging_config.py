@@ -8,6 +8,7 @@ This module provides:
 """
 import json
 import logging
+import logging.handlers
 import sys
 from datetime import datetime
 from pathlib import Path
@@ -83,9 +84,11 @@ def setup_logging(
     # Remove existing handlers
     root_logger.handlers.clear()
 
-    # File handler for server logs
+    # File handler for server logs (rotating to prevent disk exhaustion)
     server_log = log_path / "server.log"
-    file_handler = logging.FileHandler(server_log, encoding="utf-8")
+    file_handler = logging.handlers.RotatingFileHandler(
+        server_log, encoding="utf-8", maxBytes=50 * 1024 * 1024, backupCount=10
+    )
     file_handler.setLevel(level)
     file_handler.setFormatter(JSONFormatter() if json_format else HumanReadableFormatter())
     root_logger.addHandler(file_handler)

@@ -3,6 +3,7 @@ import asyncio
 import copy
 import json
 import logging
+import logging.handlers
 import threading
 import queue
 import time
@@ -13,6 +14,7 @@ from typing import Dict, Any, Optional
 
 from tradingagents.graph.trading_graph import TradingAgentsGraph
 from tradingagents.default_config import DEFAULT_CONFIG
+from tradingagents.utils.token_tracker import get_token_tracker, remove_token_tracker
 
 from .models import SSEEvent, EventType, TaskStatus
 from .task_manager import get_task_manager
@@ -41,7 +43,9 @@ def _get_agent_logger(task_id: str, ticker: str, trade_date: str) -> logging.Log
         return logger  # already configured
 
     logger.setLevel(logging.DEBUG)
-    handler = logging.FileHandler(log_file, encoding="utf-8")
+    handler = logging.handlers.RotatingFileHandler(
+        log_file, encoding="utf-8", maxBytes=20 * 1024 * 1024, backupCount=5
+    )
     handler.setFormatter(logging.Formatter("%(asctime)s %(message)s", datefmt="%Y-%m-%d %H:%M:%S"))
     logger.addHandler(handler)
     logger.propagate = False  # don't bubble up to root logger / uvicorn
@@ -142,6 +146,10 @@ def _format_agent_log(event_type: EventType, data: Dict[str, Any]) -> str:
 
 
 _runners: Dict[str, "AnalysisRunner"] = {}
+_active_tasks: Dict[str, asyncio.Task] = {}
+
+# Global semaphore to limit concurrent analysis tasks
+_task_semaphore = asyncio.Semaphore(DEFAULT_CONFIG.get("max_concurrent_tasks", 4))
 
 
 def get_runner(task_id: str) -> Optional["AnalysisRunner"]:
@@ -150,6 +158,25 @@ def get_runner(task_id: str) -> Optional["AnalysisRunner"]:
 
 def remove_runner(task_id: str):
     _runners.pop(task_id, None)
+
+
+def _cleanup_task(task_id: str):
+    """Cleanup runner and task references for a completed task."""
+    _runners.pop(task_id, None)
+    _active_tasks.pop(task_id, None)
+
+
+def _on_task_done(task: asyncio.Task, task_id: str, ticker: str):
+    """Callback for when an analysis task completes. Logs exceptions."""
+    try:
+        exc = task.exception()
+        if exc is not None:
+            _logger = get_server_logger()
+            _logger.error(f"Task {task_id} for {ticker} failed with unhandled exception: {type(exc).__name__}: {exc}")
+    except asyncio.CancelledError:
+        pass  # Task was cancelled, expected
+    finally:
+        _active_tasks.pop(task_id, None)
 
 
 class AnalysisRunner:
@@ -203,6 +230,9 @@ class AnalysisRunner:
         RETRY_DELAY = 5  # seconds
         SILENCE_TIMEOUT = 600  # seconds
 
+        # Create token tracker for this task
+        token_tracker = get_token_tracker(self.task_id)
+
         for attempt in range(MAX_RETRIES):
             try:
                 _logger.info(f"Starting analysis attempt {attempt + 1}/{MAX_RETRIES} for {self.ticker}")
@@ -210,6 +240,7 @@ class AnalysisRunner:
                 graph = TradingAgentsGraph(
                     selected_analysts=self.analysts,
                     config=self.config,
+                    callbacks=[token_tracker],
                 )
                 init_state = graph.propagator.create_initial_state(
                     self.ticker, self.trade_date, self.portfolio_holdings
@@ -266,6 +297,7 @@ class AnalysisRunner:
                     elif item_type == "cancelled":
                         get_task_manager().update_status(self.task_id, TaskStatus.CANCELLED)
                         await self._emit(EventType.FAILED, {"error": "分析已取消"})
+                        _cleanup_task(self.task_id)
                         return
                     elif item_type == "error":
                         error_info = item_data
@@ -281,7 +313,7 @@ class AnalysisRunner:
                         else:
                             raise Exception(error_info["detail"])
 
-                thread.join(timeout=2.0)
+                thread.join(timeout=30.0)
 
                 if not self._cancelled:
                     final_state = self.state
@@ -304,10 +336,15 @@ class AnalysisRunner:
                     await self._emit(EventType.COMPLETED, {"task_id": self.task_id})
                     get_task_manager().update_status(self.task_id, TaskStatus.COMPLETED)
 
+                    # Get token stats before cleanup
+                    token_stats = token_tracker.get_stats()
                     result = self._build_result(final_state)
+                    result["token_stats"] = token_stats
                     get_task_manager().set_result(self.task_id, result, signal)
 
-                    _logger.info(f"Analysis completed successfully for {self.ticker}")
+                    _logger.info(f"Analysis completed successfully for {self.ticker} | tokens: {token_stats.get('total_tokens', 0)}")
+                    remove_token_tracker(self.task_id)
+                    _cleanup_task(self.task_id)
                     return  # Success
 
             except LLMTimeoutError as e:
@@ -371,8 +408,9 @@ class AnalysisRunner:
                     })
                     break
 
-            finally:
-                remove_runner(self.task_id)
+        # Final cleanup for any failure path that didn't return
+        remove_token_tracker(self.task_id)
+        _cleanup_task(self.task_id)
 
     async def _process_chunk(self, chunk: Dict[str, Any]):
         for node_name, node_data in chunk.items():
@@ -639,5 +677,17 @@ async def start_analysis(
 ) -> AnalysisRunner:
     runner = AnalysisRunner(task_id, ticker, trade_date, analysts, config_override, portfolio_holdings)
     _runners[task_id] = runner
-    asyncio.create_task(runner.run())
+
+    # Acquire semaphore to limit concurrent tasks, then run in background
+    await _task_semaphore.acquire()
+
+    async def _run_with_release():
+        try:
+            await runner.run()
+        finally:
+            _task_semaphore.release()
+
+    task = asyncio.create_task(_run_with_release())
+    _active_tasks[task_id] = task
+    task.add_done_callback(lambda t, tid=task_id, tk=ticker: _on_task_done(t, tid, tk))
     return runner

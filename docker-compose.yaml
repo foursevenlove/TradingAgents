@@ -27,6 +27,10 @@ services:
       - TRADINGAGENTS_WEB_PORT=8000
       - TRADINGAGENTS_WEB_DB=/app/data/tasks.db
       - TRADINGAGENTS_WEB_LOG_DIR=/app/logs
+      # CORS configuration (comma-separated origins)
+      - TRADINGAGENTS_CORS_ORIGINS=${TRADINGAGENTS_CORS_ORIGINS:-}
+      # Optional API key for authentication
+      - TRADINGAGENTS_API_KEY=${TRADINGAGENTS_API_KEY:-}
     volumes:
       # Persist database
       - tradingagents_data:/app/data
@@ -35,15 +39,27 @@ services:
       # Persist analysis reports and results
       - tradingagents_reports:/app/reports
       - tradingagents_results:/app/results
+      # Persist cache
+      - tradingagents_cache:/app/data_cache
+    # Resource limits (adjust based on your system)
+    deploy:
+      resources:
+        limits:
+          cpus: "2"
+          memory: 4G
+        reservations:
+          cpus: "0.5"
+          memory: 1G
     healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:8000/docs"]
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
       interval: 30s
       timeout: 10s
       retries: 3
-      start_period: 10s
+      start_period: 15s
 
 volumes:
   tradingagents_data:
   tradingagents_logs:
   tradingagents_reports:
   tradingagents_results:
+  tradingagents_cache:

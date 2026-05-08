@@ -15,6 +15,8 @@ from .config import WEB_CONFIG
 from .watchlist_router import router as watchlist_router, init_watchlist_manager
 from .holdings_router import router as holdings_router, init_holdings_manager
 from .scheduler_service import create_scheduler, get_scheduler
+from pydantic import ValidationError as PydanticValidationError
+
 from .exceptions import TradingAgentsError, classify_exception, ErrorResponse
 from .logging_config import setup_logging, get_server_logger, log_exception, log_api_request
 
@@ -27,6 +29,31 @@ setup_logging(
     log_level=WEB_CONFIG.get("log_level", "INFO"),
 )
 _logger = get_server_logger()
+
+
+_SENSITIVE_PATTERNS = [
+    ("api_key", "API_KEY_REDACTED"),
+    ("apikey", "API_KEY_REDACTED"),
+    ("token", "TOKEN_REDACTED"),
+    ("secret", "SECRET_REDACTED"),
+    ("password", "PASSWORD_REDACTED"),
+    ("credential", "CREDENTIAL_REDACTED"),
+]
+
+
+def _sanitize_sensitive(text: str) -> str:
+    """Remove sensitive values from strings."""
+    import re
+    result = text
+    for pattern, replacement in _SENSITIVE_PATTERNS:
+        # Match pattern=value or pattern: value
+        result = re.sub(
+            rf"({pattern}[\s:=]+)([^\s,;]+)",
+            rf"{pattern}={replacement}",
+            result,
+            flags=re.IGNORECASE
+        )
+    return result
 
 
 def _cleanup_orphan_tasks():
@@ -84,21 +111,51 @@ def create_app() -> FastAPI:
             content=response.to_dict(),
         )
 
+    @app.exception_handler(PydanticValidationError)
+    async def validation_error_handler(request: Request, exc: PydanticValidationError):
+        """Handle Pydantic validation errors with user-friendly messages."""
+        errors = exc.errors()
+        messages = []
+        for err in errors:
+            loc = " -> ".join(str(x) for x in err.get("loc", []))
+            msg = err.get("msg", "")
+            messages.append(f"{loc}: {msg}")
+        user_msg = "请求参数校验失败: " + "; ".join(messages)
+        log_exception(exc, context={
+            "path": request.url.path,
+            "method": request.method,
+            "error_code": "VALIDATION_ERROR",
+        })
+        return JSONResponse(
+            status_code=400,
+            content={
+                "error_code": "VALIDATION_ERROR",
+                "message": user_msg,
+                "detail": _sanitize_sensitive(str(exc)),
+            },
+        )
+
     @app.exception_handler(Exception)
     async def global_exception_handler(request: Request, exc: Exception):
         """Handle any uncaught exception - service stays alive, user gets friendly message."""
         classified = classify_exception(exc)
         response = classified.to_response()
+        # Sanitize sensitive data from response
+        sanitized_detail = _sanitize_sensitive(response.detail or "")
         log_exception(exc, context={
             "path": request.url.path,
             "method": request.method,
             "error_code": response.error_code,
             "original_type": type(exc).__name__,
         })
-        _logger.critical(f"Unhandled exception: {type(exc).__name__}: {str(exc)}")
+        _logger.critical(f"Unhandled exception: {type(exc).__name__}: {_sanitize_sensitive(str(exc))}")
         return JSONResponse(
             status_code=response.status_code,
-            content=response.to_dict(),
+            content={
+                "error_code": response.error_code,
+                "message": response.message,
+                "detail": sanitized_detail,
+            },
         )
 
     # ── Request Logging Middleware ──────────────────────────────────────────────
@@ -128,13 +185,31 @@ def create_app() -> FastAPI:
             raise  # Let exception handler deal with it
 
     # ── CORS Middleware ──────────────────────────────────────────────────────────
+    cors_origins = WEB_CONFIG.get("cors_origins", ["*"])
     app.add_middleware(
         CORSMiddleware,
-        allow_origins=["*"],
+        allow_origins=cors_origins,
         allow_credentials=True,
         allow_methods=["*"],
         allow_headers=["*"],
     )
+
+    # ── API Key Middleware (optional) ──────────────────────────────────────────────
+    api_key = WEB_CONFIG.get("api_key", "")
+    if api_key:
+        @app.middleware("http")
+        async def api_key_auth(request: Request, call_next):
+            # Skip auth for health endpoint and docs
+            if request.url.path in ("/health", "/docs", "/openapi.json") or request.url.path.startswith("/assets"):
+                return await call_next(request)
+
+            provided_key = request.headers.get("X-API-Key") or request.query_params.get("api_key")
+            if provided_key != api_key:
+                return JSONResponse(
+                    status_code=401,
+                    content={"error_code": "UNAUTHORIZED", "message": "API Key 无效或缺失"},
+                )
+            return await call_next(request)
 
     # Mount API routers
     app.include_router(router)

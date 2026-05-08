@@ -11,6 +11,7 @@ import pandas as pd
 from datetime import datetime
 
 from tradingagents.dataflows.akshare_common import _convert_ticker_format, AkshareDataError
+from tradingagents.utils.data_cache import get_industry_cache
 
 
 def get_sw_industry(ticker: str) -> Dict[str, str]:
@@ -25,6 +26,12 @@ def get_sw_industry(ticker: str) -> Dict[str, str]:
     Returns:
         Dictionary with industry classification info
     """
+    # Check cache first (30 day TTL for industry classification)
+    cache = get_industry_cache()
+    cached = cache.get_industry(ticker)
+    if cached:
+        return cached
+
     try:
         stock_code, market = _convert_ticker_format(ticker)
 
@@ -41,7 +48,7 @@ def get_sw_industry(ticker: str) -> Dict[str, str]:
                 # Extract industry from profile
                 main_industry = industry_info.get("所属行业", "未知")
 
-                return {
+                result = {
                     "level_1": main_industry,
                     "level_2": industry_info.get("细分行业", main_industry),
                     "level_3": industry_info.get("行业分类", main_industry),
@@ -50,6 +57,8 @@ def get_sw_industry(ticker: str) -> Dict[str, str]:
                     "company_name": df["公司名称"].iloc[0] if "公司名称" in df.columns else "",
                     "message": f"Industry classification for {ticker} from cninfo",
                 }
+                cache.set_industry(ticker, result)
+                return result
         except Exception:
             pass  # cninfo may fail for some stocks
 
@@ -64,7 +73,7 @@ def get_sw_industry(ticker: str) -> Dict[str, str]:
                     if "行业" in item:
                         industry_info[item] = value
 
-                return {
+                result = {
                     "level_1": industry_info.get("所属行业", "未知"),
                     "level_2": industry_info.get("细分行业", "未知"),
                     "level_3": industry_info.get("行业分类", "未知"),
@@ -72,10 +81,12 @@ def get_sw_industry(ticker: str) -> Dict[str, str]:
                     "ticker": ticker,
                     "message": f"Industry classification for {ticker} from eastmoney",
                 }
+                cache.set_industry(ticker, result)
+                return result
         except Exception:
             pass  # eastmoney may fail due to network issues
 
-        return {
+        result = {
             "level_1": "未知",
             "level_2": "未知",
             "level_3": "未知",
@@ -83,6 +94,8 @@ def get_sw_industry(ticker: str) -> Dict[str, str]:
             "ticker": ticker,
             "message": f"Could not determine industry for {ticker}",
         }
+        cache.set_industry(ticker, result)
+        return result
 
     except Exception as e:
         raise AkshareDataError(f"Failed to get industry classification for {ticker}: {str(e)}")

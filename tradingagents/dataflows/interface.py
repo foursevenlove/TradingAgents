@@ -1,3 +1,4 @@
+from concurrent.futures import ThreadPoolExecutor, TimeoutError as FutureTimeoutError
 from typing import Annotated
 
 # Import from vendor-specific modules
@@ -80,6 +81,61 @@ from .tushare_stock import (
 
 # Configuration and routing logic
 from .config import get_config
+
+
+def _call_with_timeout(func, timeout_seconds, *args, **kwargs):
+    """Call a function with a timeout. Raises TimeoutError if exceeded."""
+    with ThreadPoolExecutor(max_workers=1) as executor:
+        future = executor.submit(func, *args, **kwargs)
+        try:
+            return future.result(timeout=timeout_seconds)
+        except FutureTimeoutError:
+            raise TimeoutError(f"Data source call timed out after {timeout_seconds}s")
+
+
+import time
+
+
+class _CircuitBreaker:
+    """Simple in-memory circuit breaker for data vendors.
+
+    Tracks consecutive failures per vendor. After FAILURE_THRESHOLD consecutive
+    failures, the vendor is skipped for COOLDOWN_SECONDS.
+    """
+
+    FAILURE_THRESHOLD = 3
+    COOLDOWN_SECONDS = 60
+
+    def __init__(self):
+        self._failures = {}  # vendor -> consecutive failure count
+        self._last_failure = {}  # vendor -> timestamp
+        self._tripped = {}  # vendor -> bool
+
+    def record_success(self, vendor: str):
+        self._failures[vendor] = 0
+        self._tripped[vendor] = False
+
+    def record_failure(self, vendor: str):
+        now = time.time()
+        self._last_failure[vendor] = now
+        self._failures[vendor] = self._failures.get(vendor, 0) + 1
+        if self._failures[vendor] >= self.FAILURE_THRESHOLD:
+            self._tripped[vendor] = True
+
+    def is_open(self, vendor: str) -> bool:
+        if not self._tripped.get(vendor):
+            return False
+        now = time.time()
+        last = self._last_failure.get(vendor, 0)
+        if now - last > self.COOLDOWN_SECONDS:
+            # Cooldown expired, reset
+            self._tripped[vendor] = False
+            self._failures[vendor] = 0
+            return False
+        return True
+
+
+_circuit_breaker = _CircuitBreaker()
 
 # Tools organized by category
 TOOLS_CATEGORIES = {
@@ -294,6 +350,21 @@ def route_to_vendor(method: str, *args, **kwargs):
         if vendor not in fallback_vendors:
             fallback_vendors.append(vendor)
 
+    # Timeout for data source calls
+    timeout_sec = get_config().get("tool_timeout", 90)
+
+    def _try_vendor(vendor: str, impl_func):
+        """Call a vendor implementation with circuit breaker and timeout."""
+        if _circuit_breaker.is_open(vendor):
+            raise TimeoutError(f"Circuit breaker open for {vendor}")
+        try:
+            result = _call_with_timeout(impl_func, timeout_sec, *args, **kwargs)
+            _circuit_breaker.record_success(vendor)
+            return result
+        except (AlphaVantageRateLimitError, TushareNewsDataError, TushareStockDataError, AkshareDataError, TimeoutError):
+            _circuit_breaker.record_failure(vendor)
+            raise
+
     # Special handling for news methods with tushare keyword filtering + akshare fallback
     if method in ["get_news", "get_global_news", "get_company_news", "get_industry_news", "get_policy_news"]:
         tushare_result = None
@@ -304,7 +375,7 @@ def route_to_vendor(method: str, *args, **kwargs):
             try:
                 vendor_impl = VENDOR_METHODS[method]["tushare"]
                 impl_func = vendor_impl[0] if isinstance(vendor_impl, list) else vendor_impl
-                tushare_result = impl_func(*args, **kwargs)
+                tushare_result = _try_vendor("tushare", impl_func)
 
                 # Check if tushare indicates fallback needed
                 if "_FALLBACK_TO_AKSHARE_" in str(tushare_result):
@@ -313,7 +384,7 @@ def route_to_vendor(method: str, *args, **kwargs):
                         try:
                             akshare_impl = VENDOR_METHODS[method]["akshare"]
                             akshare_func = akshare_impl[0] if isinstance(akshare_impl, list) else akshare_impl
-                            akshare_result = akshare_func(*args, **kwargs)
+                            akshare_result = _try_vendor("akshare", akshare_func)
 
                             # Combine results: tushare data + akshare data
                             if tushare_result and akshare_result:
@@ -342,7 +413,7 @@ def route_to_vendor(method: str, *args, **kwargs):
                 else:
                     # Tushare returned valid data, use it
                     return tushare_result
-            except (TushareNewsDataError, TushareDataError):
+            except (TushareNewsDataError, TushareDataError, TimeoutError):
                 tushare_result = None
 
         # If tushare not available or failed, try other vendors
@@ -356,8 +427,8 @@ def route_to_vendor(method: str, *args, **kwargs):
             impl_func = vendor_impl[0] if isinstance(vendor_impl, list) else vendor_impl
 
             try:
-                return impl_func(*args, **kwargs)
-            except (AlphaVantageRateLimitError, TushareNewsDataError, TushareStockDataError, AkshareDataError):
+                return _try_vendor(vendor, impl_func)
+            except (AlphaVantageRateLimitError, TushareNewsDataError, TushareStockDataError, AkshareDataError, TimeoutError):
                 continue
 
         raise RuntimeError(f"No available vendor for '{method}'")
@@ -371,8 +442,8 @@ def route_to_vendor(method: str, *args, **kwargs):
         impl_func = vendor_impl[0] if isinstance(vendor_impl, list) else vendor_impl
 
         try:
-            return impl_func(*args, **kwargs)
-        except (AlphaVantageRateLimitError, TushareNewsDataError, TushareStockDataError):
-            continue  # Rate limits and Tushare config errors trigger fallback
+            return _try_vendor(vendor, impl_func)
+        except (AlphaVantageRateLimitError, TushareNewsDataError, TushareStockDataError, TimeoutError):
+            continue  # Rate limits, timeouts and Tushare config errors trigger fallback
 
     raise RuntimeError(f"No available vendor for '{method}'")

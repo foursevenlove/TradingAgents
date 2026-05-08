@@ -157,6 +157,12 @@ class TradingAgentsGraph:
         kwargs = {}
         provider = self.config.get("llm_provider", "").lower()
 
+        # Pass timeout from config
+        llm_timeouts = self.config.get("llm_timeout", {})
+        timeout = llm_timeouts.get(provider) or llm_timeouts.get("default", 120)
+        if timeout:
+            kwargs["timeout"] = timeout
+
         # Pass temperature if configured
         temperature = self.config.get("temperature")
         if temperature is not None:

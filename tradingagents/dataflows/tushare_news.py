@@ -28,6 +28,13 @@ try:
 except ImportError:
     INDUSTRY_AVAILABLE = False
 
+# Keyword cache for LLM-generated keywords
+try:
+    from tradingagents.utils.data_cache import get_keyword_cache
+    KEYWORD_CACHE_AVAILABLE = True
+except ImportError:
+    KEYWORD_CACHE_AVAILABLE = False
+
 def _strip_html(text: str) -> str:
     """Remove HTML tags and collapse whitespace."""
     if not text:
@@ -342,6 +349,13 @@ def _llm_expand_keywords(
     Returns a list of keywords covering upstream, downstream, competitors,
     and technology/product terms related to the company.
     """
+    # Check cache first (30 day TTL for LLM-generated keywords)
+    if KEYWORD_CACHE_AVAILABLE:
+        cache = get_keyword_cache()
+        cached = cache.get_keywords(ticker)
+        if cached:
+            return cached
+
     llm = _get_filter_llm()
     if llm is None:
         return []
@@ -376,7 +390,13 @@ def _llm_expand_keywords(
             kw = re.sub(r'^[\d\-\*•]+[\.\)\s]*', '', kw)
             if kw and len(kw) >= 2 and len(kw) <= 20:
                 keywords.append(kw)
-        return keywords[:30]  # 上限30个
+        keywords = keywords[:30]  # 上限30个
+
+        # Cache the result
+        if KEYWORD_CACHE_AVAILABLE and keywords:
+            cache.set_keywords(ticker, keywords)
+
+        return keywords
     except Exception:
         return []
 
@@ -1018,3 +1038,120 @@ def get_policy_news(
         raise e
     except Exception as e:
         raise TushareDataError(f"Failed to get policy news for {ticker}: {str(e)}")
+
+# ── Backward Compatibility Functions (保留旧接口) ─────────────────────────────
+
+def get_news(
+    ticker: Annotated[str, "A-share ticker symbol (e.g., 000001.SZ, 600000.SH)"],
+    start_date: Annotated[str, "开始日期，格式：yyyy-mm-dd"] = None,
+    end_date: Annotated[str, "结束日期，格式：yyyy-mm-dd"] = None,
+) -> str:
+    """Get company-specific news (backward compatibility wrapper).
+    
+    Delegates to get_company_news for the new three-layer architecture.
+    
+    Args:
+        ticker: A-share ticker symbol
+        start_date: Start date (yyyy-mm-dd)
+        end_date: End date (yyyy-mm-dd)
+    
+    Returns:
+        CSV-formatted news data with company news
+    """
+    return get_company_news(ticker, start_date, end_date)
+
+
+def get_global_news(
+    curr_date: Annotated[str, "当前日期，格式：yyyy-mm-dd"] = None,
+    look_back_days: Annotated[int, "回溯天数"] = 7,
+    limit: Annotated[int, "返回的最大文章数"] = 200,
+    ticker: Annotated[str, "股票代码（可选，用于行业相关性筛选）"] = None,
+) -> str:
+    """Get global financial news (backward compatibility wrapper).
+    
+    Delegates to get_industry_news when ticker is provided,
+    otherwise returns unfiltered major_news.
+    
+    Args:
+        curr_date: Current date (yyyy-mm-dd)
+        look_back_days: Days to look back
+        limit: Maximum articles to return
+        ticker: Optional ticker for industry filtering
+    
+    Returns:
+        CSV-formatted news data
+    """
+    if ticker:
+        # Use new industry news layer
+        if curr_date:
+            end_date = curr_date
+            start_date = (datetime.strptime(curr_date, "%Y-%m-%d") - timedelta(days=look_back_days)).strftime("%Y-%m-%d")
+        else:
+            end_date = datetime.now().strftime("%Y-%m-%d")
+            start_date = (datetime.now() - timedelta(days=look_back_days)).strftime("%Y-%m-%d")
+        return get_industry_news(ticker, start_date, end_date)
+    
+    # No ticker: return raw major_news (deprecated behavior)
+    try:
+        pro = _get_pro_api()
+        if curr_date:
+            end = curr_date
+            start = (datetime.strptime(curr_date, "%Y-%m-%d") - timedelta(days=look_back_days)).strftime("%Y-%m-%d")
+        else:
+            end = datetime.now().strftime("%Y-%m-%d")
+            start = (datetime.now() - timedelta(days=look_back_days)).strftime("%Y-%m-%d")
+        
+        df = pro.major_news(start_date=start, end_date=end)
+        if df.empty:
+            return "# No global news found\n"
+        
+        df = df.head(limit)
+        header = f"# Global Financial News\n# Date: {start} to {end}\n# Total: {len(df)} items\n"
+        return _format_to_csv(df, header)
+    except TushareDataError as e:
+        raise e
+    except Exception as e:
+        raise TushareDataError(f"Failed to get global news: {str(e)}")
+
+
+def get_cctv_news(
+    look_back_days: Annotated[int, "回溯天数，默认3天"] = 3,
+) -> str:
+    """Get CCTV news broadcast transcripts (backward compatibility wrapper).
+    
+    Returns unfiltered CCTV news without LLM filtering.
+    Use get_policy_news for ticker-specific policy filtering.
+    
+    Args:
+        look_back_days: Days to look back (default 3)
+    
+    Returns:
+        CSV-formatted CCTV news data
+    """
+    try:
+        pro = _get_pro_api()
+        today = datetime.now()
+        
+        dfs = []
+        for i in range(look_back_days):
+            date = (today - timedelta(days=i)).strftime("%Y-%m-%d")
+            try:
+                df = pro.cctv_news(date=date)
+                if not df.empty:
+                    dfs.append(df)
+            except Exception:
+                pass
+        
+        if not dfs:
+            return "# No CCTV news found\n"
+        
+        merged_df = pd.concat(dfs, ignore_index=True)
+        merged_df = merged_df.sort_values('pub_time', ascending=False).reset_index(drop=True)
+        
+        header = f"# CCTV News Broadcast\n# Date: {(today - timedelta(days=look_back_days-1)).strftime('%Y-%m-%d')} to {today.strftime('%Y-%m-%d')}\n# Total: {len(merged_df)} items\n"
+        return _format_to_csv(merged_df, header)
+        
+    except TushareDataError as e:
+        raise e
+    except Exception as e:
+        raise TushareDataError(f"Failed to get CCTV news: {str(e)}")

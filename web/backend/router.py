@@ -3,7 +3,7 @@ import asyncio
 from typing import Optional
 
 from fastapi import APIRouter, HTTPException, Query
-from fastapi.responses import StreamingResponse
+from fastapi.responses import StreamingResponse, JSONResponse, Response
 
 from .models import (
     AnalyzeRequest,
@@ -277,4 +277,144 @@ async def system_config():
         default_analysts=["market", "social", "news", "fundamentals"],
         default_debate_rounds=DEFAULT_CONFIG.get("max_debate_rounds", 3),
         default_risk_rounds=DEFAULT_CONFIG.get("max_risk_discuss_rounds", 2),
+    )
+
+
+@router.get("/health")
+async def health_check():
+    """Health check endpoint with dependency validation."""
+    import os
+    import sqlite3
+    from concurrent.futures import ThreadPoolExecutor, TimeoutError as FutureTimeoutError
+
+    results = {}
+    overall = "healthy"
+
+    def _check_db():
+        db_path = WEB_CONFIG["db_path"]
+        with sqlite3.connect(db_path, timeout=5) as conn:
+            conn.execute("SELECT 1")
+        return "ok"
+
+    def _check_tushare():
+        token = os.environ.get("TUSHARE_TOKEN", "")
+        if not token:
+            return "missing_token"
+        return "ok"
+
+    def _check_akshare():
+        try:
+            import akshare as ak
+            _ = ak.stock_zh_a_spot_em()
+            return "ok"
+        except Exception as e:
+            return f"error: {type(e).__name__}"
+
+    def _check_llm():
+        from tradingagents.default_config import DEFAULT_CONFIG
+        provider = DEFAULT_CONFIG.get("llm_provider", "minimax")
+        key_envs = {
+            "minimax": "MINIMAX_API_KEY",
+            "alibaba": "DASHSCOPE_API_KEY",
+            "openai": "OPENAI_API_KEY",
+            "anthropic": "ANTHROPIC_API_KEY",
+            "google": "GOOGLE_API_KEY",
+        }
+        env = key_envs.get(provider, "")
+        if env and os.environ.get(env):
+            return "ok"
+        # Check fallback envs
+        if provider == "alibaba" and os.environ.get("ALIBABA_API_KEY"):
+            return "ok"
+        return f"missing_api_key ({env})"
+
+    checks = [
+        ("db", _check_db),
+        ("tushare", _check_tushare),
+        ("akshare", _check_akshare),
+        ("llm", _check_llm),
+    ]
+
+    for name, check_fn in checks:
+        try:
+            with ThreadPoolExecutor(max_workers=1) as executor:
+                future = executor.submit(check_fn)
+                result = future.result(timeout=10)
+                results[name] = result
+        except FutureTimeoutError:
+            results[name] = "timeout"
+            overall = "degraded"
+        except Exception as e:
+            results[name] = f"error: {type(e).__name__}: {str(e)}"
+            overall = "degraded"
+
+    status_code = 200 if overall == "healthy" else 503
+    return JSONResponse(
+        status_code=status_code,
+        content={"status": overall, "checks": results},
+    )
+
+
+@router.get("/metrics")
+async def prometheus_metrics():
+    """Prometheus-style metrics endpoint for monitoring."""
+    from tradingagents.default_config import DEFAULT_CONFIG
+    from tradingagents.utils.token_tracker import get_all_stats
+    from tradingagents.utils.data_cache import get_data_cache
+    import os
+
+    lines = []
+
+    # System info
+    lines.append(f"tradingagents_version 0.2.1")
+    lines.append(f"tradingagents_llm_provider {DEFAULT_CONFIG.get('llm_provider', 'unknown')}")
+
+    # Task manager stats
+    tm = get_task_manager()
+    total_tasks = tm.get_total_count()
+    lines.append(f"tradingagents_tasks_total {total_tasks}")
+
+    # Count by status from database
+    import sqlite3
+    db_path = WEB_CONFIG["db_path"]
+    try:
+        with sqlite3.connect(db_path, timeout=5) as conn:
+            conn.row_factory = sqlite3.Row
+            rows = conn.execute("SELECT status, COUNT(*) as cnt FROM tasks GROUP BY status").fetchall()
+            for row in rows:
+                lines.append(f"tradingagents_tasks_by_status{{status=\"{row['status']}\"}} {row['cnt']}")
+    except Exception:
+        pass
+
+    # Token usage stats
+    token_stats = get_all_stats()
+    total_input = sum(s.get("total_input_tokens", 0) for s in token_stats.values())
+    total_output = sum(s.get("total_output_tokens", 0) for s in token_stats.values())
+    lines.append(f"tradingagents_tokens_input_total {total_input}")
+    lines.append(f"tradingagents_tokens_output_total {total_output}")
+
+    # Active tasks
+    from .stream_adapter import _active_tasks, _task_semaphore
+    active_count = len(_active_tasks)
+    semaphore_value = _task_semaphore._value if hasattr(_task_semaphore, '_value') else 0
+    max_concurrent = DEFAULT_CONFIG.get("max_concurrent_tasks", 4)
+    lines.append(f"tradingagents_tasks_active {active_count}")
+    lines.append(f"tradingagents_semaphore_available {semaphore_value}")
+    lines.append(f"tradingagents_max_concurrent {max_concurrent}")
+
+    # Cache stats
+    try:
+        cache = get_data_cache()
+        cache_files = list(cache._cache_dir.glob("*.json"))
+        lines.append(f"tradingagents_cache_entries {len(cache_files)}")
+    except Exception:
+        pass
+
+    # Data source availability
+    tushare_token = os.environ.get("TUSHARE_TOKEN", "")
+    lines.append(f"tradingagents_tushare_available {1 if tushare_token else 0}")
+
+    return Response(
+        content="\n".join(lines) + "\n",
+        media_type="text/plain",
     )

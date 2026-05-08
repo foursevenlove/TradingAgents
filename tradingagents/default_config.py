@@ -40,4 +40,18 @@ DEFAULT_CONFIG = {
         "industry_classification": "akshare",
     },
     "tool_vendors": {},
+
+    # ── Timeout Configuration ──────────────────────────────────────
+    "tool_timeout": 90,  # seconds for single tool call (data fetch)
+    "llm_timeout": {
+        "minimax": 300,
+        "alibaba": 180,
+        "openai": 120,
+        "anthropic": 120,
+        "google": 120,
+        "default": 120,
+    },
+
+    # ── Concurrency Configuration ──────────────────────────────────
+    "max_concurrent_tasks": 4,  # max concurrent analysis tasks globally
 }

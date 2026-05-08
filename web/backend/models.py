@@ -1,8 +1,9 @@
 """Pydantic models for the TradingAgents Web UI API."""
+import re
 from enum import Enum
 from typing import Optional, List, Dict, Any
-from pydantic import BaseModel, Field
-from datetime import datetime
+from pydantic import BaseModel, Field, field_validator
+from datetime import datetime, date as date_type
 
 
 class EventType(str, Enum):
@@ -41,6 +42,9 @@ class TaskStatus(str, Enum):
     CANCELLED = "cancelled"
 
 
+_TICKER_PATTERN = re.compile(r"^\d{6}\.(SH|SZ|BJ)$")
+
+
 class AnalyzeRequest(BaseModel):
     ticker: str = Field(..., description="股票代码，如 600000.SH")
     trade_date: Optional[str] = Field(None, description="分析日期，默认今天")
@@ -51,6 +55,27 @@ class AnalyzeRequest(BaseModel):
     max_debate_rounds: Optional[int] = Field(None, description="多空辩论轮数")
     max_risk_discuss_rounds: Optional[int] = Field(None, description="风险讨论轮数")
     data_vendors: Optional[Dict[str, str]] = Field(None, description="数据源配置覆盖")
+
+    @field_validator("ticker")
+    @classmethod
+    def validate_ticker(cls, v: str) -> str:
+        v = v.strip().upper()
+        if not _TICKER_PATTERN.match(v):
+            raise ValueError("股票代码格式不正确，应为 6 位数字+交易所后缀，如 600000.SH")
+        return v
+
+    @field_validator("trade_date")
+    @classmethod
+    def validate_trade_date(cls, v: Optional[str]) -> Optional[str]:
+        if v is None:
+            return v
+        try:
+            parsed = datetime.strptime(v, "%Y-%m-%d").date()
+        except ValueError:
+            raise ValueError("交易日期格式不正确，应为 YYYY-MM-DD")
+        if parsed > date_type.today():
+            raise ValueError("交易日期不能是未来日期")
+        return v
 
 
 class TaskSummary(BaseModel):
