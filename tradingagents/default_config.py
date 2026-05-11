@@ -38,6 +38,7 @@ DEFAULT_CONFIG = {
         "news_data": "tushare,akshare",
         "ashare_market_indicators": "akshare",
         "industry_classification": "akshare",
+        "stock_screening": "tushare",
     },
     "tool_vendors": {},
 

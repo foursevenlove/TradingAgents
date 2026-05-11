@@ -12,6 +12,43 @@ from .y_finance import (
     get_insider_transactions as get_yfinance_insider_transactions,
 )
 from .yfinance_news import get_news_yfinance, get_global_news_yfinance
+
+# Import stock screening functions (akshare)
+from .akshare_screening import (
+    get_a_share_spot_sina,
+    screen_stocks as screen_stocks_akshare,
+    get_top_gainers,
+    get_stock_daily_sina,
+)
+
+# Placeholder functions for eastmoney interfaces (network issues)
+def get_a_share_spot():
+    """Fallback to Sina when Eastmoney is unavailable."""
+    return get_a_share_spot_sina()
+
+def get_stock_zt_pool(date=None):
+    """Placeholder - Eastmoney interface may be blocked."""
+    return get_top_gainers(20)
+
+def get_stock_hot_rank():
+    """Placeholder - Eastmoney interface may be blocked."""
+    return get_top_gainers(100)
+
+def get_sector_fund_flow():
+    """Placeholder - not available in Sina."""
+    return "Eastmoney interface unavailable"
+
+def get_individual_fund_flow():
+    """Placeholder - not available in Sina."""
+    return "Eastmoney interface unavailable"
+
+# Import stock screening functions (tushare)
+from .tushare_screening import (
+    get_daily_basic,
+    get_moneyflow,
+    get_limit_list,
+    screen_stocks_tushare,
+)
 from .alpha_vantage import (
     get_stock as get_alpha_vantage_stock,
     get_indicator as get_alpha_vantage_indicator,
@@ -39,6 +76,7 @@ from .akshare import (
     get_company_news as get_akshare_company_news,
     get_industry_news as get_akshare_industry_news,
     get_policy_news as get_akshare_policy_news,
+    get_recommendation_news as get_akshare_recommendation_news,
     # A-share specific indicators
     get_north_bound_flow as get_akshare_north_bound_flow,
     get_margin_trading as get_akshare_margin_trading,
@@ -66,6 +104,7 @@ from .tushare_news import (
     get_company_news as get_tushare_company_news,
     get_industry_news as get_tushare_industry_news,
     get_policy_news as get_tushare_policy_news,
+    get_recommendation_news as get_tushare_recommendation_news,
     TushareDataError,
 )
 
@@ -171,6 +210,7 @@ TOOLS_CATEGORIES = {
             "get_policy_news",
             "get_cctv_news",
             "get_insider_transactions",
+            "get_recommendation_news",
         ]
     },
     "ashare_market_indicators": {
@@ -190,6 +230,17 @@ TOOLS_CATEGORIES = {
             "get_sw_industry",
             "get_industry_peers",
             "get_industry_performance",
+        ]
+    },
+    "stock_screening": {
+        "description": "Stock screening and market-wide scanning tools",
+        "tools": [
+            "get_a_share_spot",
+            "get_stock_zt_pool",
+            "get_stock_hot_rank",
+            "get_sector_fund_flow",
+            "get_individual_fund_flow",
+            "screen_stocks",
         ]
     }
 }
@@ -281,6 +332,11 @@ VENDOR_METHODS = {
     "get_cctv_news": {
         "tushare": get_tushare_cctv_news,
     },
+    # recommendation system news
+    "get_recommendation_news": {
+        "akshare": get_akshare_recommendation_news,
+        "tushare": get_tushare_recommendation_news,
+    },
     # ashare_market_indicators
     "get_north_bound_flow": {
         "akshare": get_akshare_north_bound_flow,
@@ -309,6 +365,32 @@ VENDOR_METHODS = {
     },
     "get_industry_performance": {
         "akshare": get_akshare_industry_performance,
+    },
+    # stock_screening - akshare
+    "get_a_share_spot": {
+        "akshare": get_a_share_spot,
+    },
+    "screen_stocks_akshare": {
+        "akshare": screen_stocks_akshare,
+    },
+    "get_top_gainers": {
+        "akshare": get_top_gainers,
+    },
+    "get_stock_daily_sina": {
+        "akshare": get_stock_daily_sina,
+    },
+    # stock_screening - tushare
+    "get_daily_basic": {
+        "tushare": get_daily_basic,
+    },
+    "get_moneyflow": {
+        "tushare": get_moneyflow,
+    },
+    "get_limit_list": {
+        "tushare": get_limit_list,
+    },
+    "screen_stocks": {
+        "tushare": screen_stocks_tushare,
     },
 }
 

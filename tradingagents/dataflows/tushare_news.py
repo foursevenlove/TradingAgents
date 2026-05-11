@@ -1118,20 +1118,20 @@ def get_cctv_news(
     look_back_days: Annotated[int, "回溯天数，默认3天"] = 3,
 ) -> str:
     """Get CCTV news broadcast transcripts (backward compatibility wrapper).
-    
+
     Returns unfiltered CCTV news without LLM filtering.
     Use get_policy_news for ticker-specific policy filtering.
-    
+
     Args:
         look_back_days: Days to look back (default 3)
-    
+
     Returns:
         CSV-formatted CCTV news data
     """
     try:
         pro = _get_pro_api()
         today = datetime.now()
-        
+
         dfs = []
         for i in range(look_back_days):
             date = (today - timedelta(days=i)).strftime("%Y-%m-%d")
@@ -1141,17 +1141,193 @@ def get_cctv_news(
                     dfs.append(df)
             except Exception:
                 pass
-        
+
         if not dfs:
             return "# No CCTV news found\n"
-        
+
         merged_df = pd.concat(dfs, ignore_index=True)
         merged_df = merged_df.sort_values('pub_time', ascending=False).reset_index(drop=True)
-        
+
         header = f"# CCTV News Broadcast\n# Date: {(today - timedelta(days=look_back_days-1)).strftime('%Y-%m-%d')} to {today.strftime('%Y-%m-%d')}\n# Total: {len(merged_df)} items\n"
         return _format_to_csv(merged_df, header)
-        
+
     except TushareDataError as e:
         raise e
     except Exception as e:
         raise TushareDataError(f"Failed to get CCTV news: {str(e)}")
+
+
+# ── Recommendation System News (推荐系统专用) ────────────────────────────────
+
+# 推荐系统数据源配置（扩展更多高质量源）
+RECOMMENDATION_SOURCES = {
+    # 快讯源（高频热点，6小时分段）
+    "flash": ["cls", "sina", "eastmoney", "10jqka"],
+    # 深度源（长篇分析，12小时分段）
+    "depth": [],  # major_news已单独处理
+    # 财经门户（需要分段）
+    "portal": ["jinrongjie", "yicai"],
+    # 全球财经（华尔街见闻）
+    "global": ["wallstreetcn"],
+}
+
+
+def get_recommendation_news(
+    look_back_days: Annotated[int, "回溯天数，每日推荐默认1天，每周推荐默认7天"] = 1,
+    max_articles: Annotated[int, "返回的最大新闻数量，默认1000条（充分利用1M上下文）"] = 1000,
+    include_cctv: Annotated[bool, "是否包含新闻联播政策新闻"] = True,
+) -> str:
+    """获取推荐系统所需的全球热点新闻（不基于特定ticker）。
+
+    聚合多个数据源（充分利用1M上下文LLM）：
+    1. 快讯源（cls/sina/eastmoney/10jqka）：实时市场热点，6小时分段
+    2. 财经门户（jinrongjie/yicai）：财经资讯，单次拉取
+    3. major_news（长篇通讯）：深度产业分析，12小时分段
+    4. wallstreetcn（华尔街见闻）：全球财经，6小时分段
+    5. cctv_news（新闻联播）：政策热点，按天拉取（可选）
+
+    这是推荐系统ThemeExtractor的数据源，用于提取投资主题。
+    与三层新闻架构的区别：
+    - 不基于特定ticker，直接返回全局新闻
+    - 不做关键词过滤或LLM语义筛选
+    - 复用已有的分段获取逻辑，避免1500条上限
+    - 支持大上下文LLM（max_articles可设300-500+）
+
+    Args:
+        look_back_days: 回溯天数（每日推荐=1，每周推荐=7）
+        max_articles: 返回的最大新闻数量（默认300，可设500+）
+        include_cctv: 是否包含新闻联播政策新闻
+
+    Returns:
+        CSV格式的新闻数据，包含title, content, datetime, data_source列
+    """
+    try:
+        pro = _get_pro_api()
+        today = datetime.now()
+        start_date = today - timedelta(days=look_back_days)
+        start_dt_obj = start_date
+        end_dt_obj = today
+        start_dt_str = start_date.strftime("%Y-%m-%d %H:%M:%S")
+        end_dt_str = today.strftime("%Y-%m-%d %H:%M:%S")
+
+        all_news = []
+
+        # 1. 快讯源（高频热点）- 6小时分段
+        for src in RECOMMENDATION_SOURCES["flash"]:
+            try:
+                df = _segmented_fetch(pro, src, start_dt_obj, end_dt_obj)
+                if not df.empty:
+                    df['data_source'] = src
+                    all_news.append(df)
+                    print(f"  {src}: {len(df)}条")
+            except Exception as e:
+                print(f"  {src}: 获取失败 ({e})")
+                pass
+
+        # 2. 财经门户 - 单次拉取（数据量较小）
+        for src in RECOMMENDATION_SOURCES["portal"]:
+            try:
+                df = pro.news(src=src, start_date=start_dt_str, end_date=end_dt_str)
+                if not df.empty:
+                    df['data_source'] = src
+                    all_news.append(df)
+                    print(f"  {src}: {len(df)}条")
+            except Exception:
+                pass
+
+        # 3. wallstreetcn（全球财经）- 6小时分段
+        for src in RECOMMENDATION_SOURCES["global"]:
+            try:
+                df = _segmented_fetch(pro, src, start_dt_obj, end_dt_obj)
+                if not df.empty:
+                    df['data_source'] = src
+                    all_news.append(df)
+                    print(f"  {src}: {len(df)}条")
+            except Exception:
+                pass
+
+        # 4. major_news（深度产业分析）- 12小时分段
+        try:
+            major_df = _segmented_fetch_major(pro, start_dt_obj, end_dt_obj)
+            if not major_df.empty:
+                all_news.append(major_df)
+                print(f"  major_news: {len(major_df)}条")
+        except Exception:
+            pass
+
+        # 5. cctv_news（政策热点）- 按天拉取（可选）
+        if include_cctv:
+            try:
+                cctv_list = []
+                for i in range(look_back_days):
+                    date = today - timedelta(days=i)
+                    date_str = date.strftime("%Y%m%d")
+                    try:
+                        df = pro.cctv_news(date=date_str)
+                        if not df.empty:
+                            df['datetime'] = df.get('pub_time', '')
+                            df['data_source'] = 'cctv'
+                            cctv_list.append(df)
+                    except Exception:
+                        continue
+
+                if cctv_list:
+                    cctv_df = pd.concat(cctv_list, ignore_index=True)
+                    all_news.append(cctv_df)
+                    print(f"  cctv: {len(cctv_df)}条")
+            except Exception:
+                pass
+
+        if not all_news:
+            return f"# 推荐系统热点新闻\n# No news available for the past {look_back_days} days\n"
+
+        # 合并、去重、排序
+        merged_df = pd.concat(all_news, ignore_index=True)
+        print(f"合并总数: {len(merged_df)}条")
+        merged_df = merged_df.drop_duplicates(subset=['title'], keep='first')
+        print(f"去重后: {len(merged_df)}条")
+
+        # 统一datetime列名
+        if 'datetime' not in merged_df.columns and 'pub_time' in merged_df.columns:
+            merged_df['datetime'] = merged_df['pub_time']
+
+        # 按时间排序（最新在前）
+        if 'datetime' in merged_df.columns:
+            merged_df = merged_df.sort_values('datetime', ascending=False)
+
+        # 清理content（去除HTML，保留完整内容供后续使用）
+        if 'content' in merged_df.columns:
+            merged_df['content'] = merged_df['content'].apply(
+                lambda x: _strip_html(str(x))[:500] if x else ''  # 截断到500字符，平衡信息量和token消耗
+            )
+
+        # 限制返回数量
+        final_df = merged_df.head(max_articles)
+
+        # 统计各源数据量
+        source_counts = final_df['data_source'].value_counts().to_dict()
+        source_str = ', '.join([f"{k}:{v}" for k, v in source_counts.items()])
+
+        header = f"# 推荐系统热点新闻\n"
+        header += f"# Date range: {start_date.strftime('%Y-%m-%d')} to {today.strftime('%Y-%m-%d')}\n"
+        header += f"# Sources: {source_str}\n"
+        header += f"# Total raw: {len(merged_df)} | Final: {len(final_df)} articles\n"
+        header += f"# Note: Global hot news for theme extraction (no ticker filtering)\n"
+
+        # 只保留必要列
+        output_cols = ['title', 'content', 'datetime', 'data_source']
+        available_cols = [c for c in output_cols if c in final_df.columns]
+        if available_cols:
+            final_df = final_df[available_cols]
+
+        return _format_to_csv(final_df, header)
+
+    except TushareDataError as e:
+        raise e
+    except Exception as e:
+        raise TushareDataError(f"Failed to get recommendation news: {str(e)}")
+
+    except TushareDataError as e:
+        raise e
+    except Exception as e:
+        raise TushareDataError(f"Failed to get recommendation news: {str(e)}")

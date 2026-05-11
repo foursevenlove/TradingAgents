@@ -292,4 +292,13 @@ export const api = {
       throw e
     }
   },
+
+  // ── Recommendations (股票推荐) ───────────────────────────────────
+  getLatestRecommendations: () => get('/api/recommend/latest'),
+  getLatestByMode: (mode) => get(`/api/recommend/latest/${mode}`),
+  getRecommendHistory: (params) => get(`/api/recommend/history?${params}`),
+  getDailyRecommend: (params) => get(`/api/recommend/daily?${params}`),
+  getWeeklyRecommend: (params) => get(`/api/recommend/weekly?${params}`),
+  getTopGainers: (params) => get(`/api/recommend/top?${params}`),
+  getThemes: (params) => get(`/api/recommend/themes?${params}`),
 }

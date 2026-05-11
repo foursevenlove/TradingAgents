@@ -310,3 +310,75 @@ def get_policy_news(
 
     except Exception as e:
         return f"# 第三层 · 政策新闻 ({ticker}) — akshare fallback\n# Error: {str(e)}\n"
+
+
+def get_recommendation_news(
+    look_back_days: Annotated[int, "回溯天数"] = 1,
+    max_articles: Annotated[int, "返回的最大新闻数量"] = 1000,
+) -> str:
+    """推荐系统热点新闻的 akshare fallback。
+
+    聚合财联社快讯 + 新闻联播，不做关键词过滤。
+    """
+    try:
+        all_news = []
+        today = datetime.now()
+
+        # 1. 财联社快讯
+        try:
+            df_cls = ak.stock_info_global_cls()
+            if not df_cls.empty:
+                df_cls = df_cls.rename(columns={
+                    "标题": "title",
+                    "内容": "content",
+                    "发布日期": "Date",
+                    "发布时间": "Time",
+                })
+                df_cls['data_source'] = 'akshare_cls'
+                all_news.append(df_cls)
+        except Exception:
+            pass
+
+        # 2. 新闻联播
+        for i in range(look_back_days):
+            date = today - timedelta(days=i)
+            date_str = date.strftime("%Y%m%d")
+            try:
+                df_cctv = ak.news_cctv(date=date_str)
+                if not df_cctv.empty:
+                    df_cctv = df_cctv.rename(columns={
+                        "date": "datetime",
+                        "title": "title",
+                        "content": "content",
+                    })
+                    df_cctv['data_source'] = 'akshare_cctv'
+                    all_news.append(df_cctv)
+            except Exception:
+                continue
+
+        if not all_news:
+            return f"# 推荐系统热点新闻 — akshare fallback\n# No news available\n"
+
+        merged = pd.concat(all_news, ignore_index=True)
+        merged = merged.drop_duplicates(subset=['title'], keep='first')
+
+        # 清理content
+        if 'content' in merged.columns:
+            merged['content'] = merged['content'].apply(lambda x: re.sub(r'<[^>]+>', '', str(x)) if x else '')
+
+        final = merged.head(max_articles)
+
+        header = f"# 推荐系统热点新闻 — akshare fallback\n"
+        header += f"# Date range: {(today - timedelta(days=look_back_days)).strftime('%Y-%m-%d')} to {today.strftime('%Y-%m-%d')}\n"
+        header += f"# Total: {len(final)} articles\n"
+        header += f"# Note: Fallback data (tushare primary)\n"
+
+        output_cols = ['title', 'content', 'datetime', 'data_source']
+        available_cols = [c for c in output_cols if c in final.columns]
+        if available_cols:
+            final = final[available_cols]
+
+        return _format_to_csv(final, header)
+
+    except Exception as e:
+        return f"# 推荐系统热点新闻 — akshare fallback\n# Error: {str(e)}\n"

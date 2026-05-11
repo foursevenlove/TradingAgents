@@ -26,6 +26,7 @@ from .akshare_news import (
     get_company_news,
     get_industry_news,
     get_policy_news,
+    get_recommendation_news,
 )
 
 # Import A-share specific indicators
@@ -38,6 +39,14 @@ from .akshare_indicators import (
     get_limit_up_down_stats,
     get_market_sentiment_index,
     get_pledge_ratio,
+)
+
+# Import stock screening data
+from .akshare_screening import (
+    get_a_share_spot_sina as get_a_share_spot,
+    screen_stocks,
+    get_top_gainers,
+    get_stock_daily_sina,
 )
 
 # Import common utilities and exceptions
@@ -69,6 +78,11 @@ __all__ = [
     "get_limit_up_down_stats",
     "get_market_sentiment_index",
     "get_pledge_ratio",
+    # Stock screening
+    "get_a_share_spot",
+    "screen_stocks",
+    "get_top_gainers",
+    "get_stock_daily_sina",
     # Exceptions
     "AkshareDataError",
 ]

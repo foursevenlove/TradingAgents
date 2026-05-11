@@ -1448,5 +1448,11 @@ def batch_analyze(
                 console.print(f"  - {r['ticker']}: {r['error']}")
 
 
+# Add recommend subcommand
+from cli.commands.recommend import recommend_app
+
+app.add_typer(recommend_app, name="recommend")
+
+
 if __name__ == "__main__":
     app()
