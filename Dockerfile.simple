@@ -4,12 +4,20 @@
 
 FROM python:3.11-slim AS backend
 
+# Accept proxy arguments
+ARG http_proxy
+ARG https_proxy
+
 WORKDIR /app
 
-# Install system dependencies
-RUN apt-get update && apt-get install -y --no-install-recommends \
-    curl \
-    && rm -rf /var/lib/apt/lists/*
+# Install system dependencies (with proxy if provided)
+# Skip curl - use Python for healthcheck instead
+RUN if [ -n "$http_proxy" ]; then \
+        export http_proxy=$http_proxy https_proxy=$https_proxy && \
+        apt-get update; \
+    else \
+        apt-get update; \
+    fi && rm -rf /var/lib/apt/lists/*
 
 # Copy requirements first for better caching
 COPY requirements.txt pyproject.toml ./
@@ -37,9 +45,9 @@ ENV TRADINGAGENTS_WEB_PORT=8000
 # Expose port
 EXPOSE 8000
 
-# Health check
+# Health check (using Python instead of curl)
 HEALTHCHECK --interval=30s --timeout=10s --start-period=5s --retries=3 \
-    CMD curl -f http://localhost:8000/health || exit 1
+    CMD python -c "import urllib.request; urllib.request.urlopen('http://localhost:8000/health')" || exit 1
 
 # Run the application
 CMD ["uvicorn", "web.backend.app:app", "--host", "0.0.0.0", "--port", "8000"]

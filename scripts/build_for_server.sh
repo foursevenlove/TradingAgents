@@ -44,11 +44,12 @@ echo -e "${GREEN}✓ 已登录阿里云${NC}"
 echo -e "${YELLOW}开始构建 amd64 镜像...${NC}"
 echo -e "${YELLOW}（跨平台构建需要几分钟，请耐心等待）${NC}"
 
+# Docker buildx 需要使用 host.docker.internal 访问宿主机代理
 docker buildx build \
     --platform ${TARGET_PLATFORM} \
     -f Dockerfile.simple \
-    --build-arg http_proxy=http://127.0.0.1:7890 \
-    --build-arg https_proxy=http://127.0.0.1:7890 \
+    --build-arg http_proxy=http://host.docker.internal:7890 \
+    --build-arg https_proxy=http://host.docker.internal:7890 \
     -t "${FULL_IMAGE}:${VERSION}" \
     -t "${FULL_IMAGE}:${COMMIT_SHA}" \
     -t "${FULL_IMAGE}:latest" \

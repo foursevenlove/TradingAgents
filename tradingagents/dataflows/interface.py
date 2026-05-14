@@ -433,7 +433,14 @@ def route_to_vendor(method: str, *args, **kwargs):
             fallback_vendors.append(vendor)
 
     # Timeout for data source calls
-    timeout_sec = get_config().get("tool_timeout", 90)
+    # News methods with LLM calls need longer timeout
+    if method in ["get_news", "get_global_news", "get_company_news", "get_industry_news", "get_policy_news"]:
+        # Use LLM timeout for news methods (they involve LLM processing)
+        llm_timeout = get_config().get("llm_timeout", {})
+        provider = get_config().get("llm_provider", "default")
+        timeout_sec = llm_timeout.get(provider, llm_timeout.get("default", 180))
+    else:
+        timeout_sec = get_config().get("tool_timeout", 90)
 
     def _try_vendor(vendor: str, impl_func):
         """Call a vendor implementation with circuit breaker and timeout."""
@@ -447,10 +454,9 @@ def route_to_vendor(method: str, *args, **kwargs):
             _circuit_breaker.record_failure(vendor)
             raise
 
-    # Special handling for news methods with tushare keyword filtering + akshare fallback
+    # Special handling for news methods - prefer tushare data over empty akshare fallback
     if method in ["get_news", "get_global_news", "get_company_news", "get_industry_news", "get_policy_news"]:
         tushare_result = None
-        akshare_result = None
 
         # Try tushare first if in fallback chain
         if "tushare" in fallback_vendors and "tushare" in VENDOR_METHODS[method]:
@@ -461,39 +467,46 @@ def route_to_vendor(method: str, *args, **kwargs):
 
                 # Check if tushare indicates fallback needed
                 if "_FALLBACK_TO_AKSHARE_" in str(tushare_result):
-                    # Call akshare as supplement
+                    # Extract tushare content (remove fallback marker)
+                    tushare_content = tushare_result.replace("_FALLBACK_TO_AKSHARE_", "").strip()
+
+                    # Only call akshare if tushare returned very few results (< 10 for company_news, < 5 for industry_news)
+                    # Otherwise, tushare data is sufficient
+                    if method in ["get_company_news"] and "# Final:" in tushare_content:
+                        # Parse final count from header
+                        import re
+                        match = re.search(r'# Final: (\d+)', tushare_content)
+                        final_count = int(match.group(1)) if match else 0
+                        if final_count >= 10:
+                            return tushare_content
+
+                    # For get_industry_news, tushare usually returns 20 items with LLM summarization
+                    # This is better than akshare's keyword-filtered global news
+                    if method in ["get_industry_news"] and "# Final:" in tushare_content:
+                        import re
+                        match = re.search(r'# Final: (\d+)', tushare_content)
+                        final_count = int(match.group(1)) if match else 0
+                        if final_count >= 5:  # 5+ industry news is sufficient
+                            return tushare_content
+
+                    # Try akshare as supplement only if tushare data is insufficient
                     if "akshare" in VENDOR_METHODS[method]:
                         try:
                             akshare_impl = VENDOR_METHODS[method]["akshare"]
                             akshare_func = akshare_impl[0] if isinstance(akshare_impl, list) else akshare_impl
                             akshare_result = _try_vendor("akshare", akshare_func)
 
-                            # Combine results: tushare data + akshare data
-                            if tushare_result and akshare_result:
-                                # Extract tushare content (remove fallback marker)
-                                tushare_content = tushare_result.replace("_FALLBACK_TO_AKSHARE_", "").strip()
-
-                                # Extract akshare data (remove header if present)
-                                akshare_data = akshare_result
-                                if akshare_result.startswith("#"):
-                                    # Skip akshare header, keep data
-                                    lines = akshare_result.split("\n")
-                                    data_start = 0
-                                    for i, line in enumerate(lines):
-                                        if not line.startswith("#") and line.strip():
-                                            data_start = i
-                                            break
-                                    akshare_data = "\n".join(lines[data_start:])
-
-                                # Combine with clear section marker
-                                return tushare_content + "\n\n# === AKSHARE SUPPLEMENT (补充数据) ===\n" + akshare_data
-                            return akshare_result
+                            # Only combine if akshare returned actual data (not "No data available")
+                            if akshare_result and "No data available" not in akshare_result:
+                                # Combine results
+                                return tushare_content + "\n\n# === AKSHARE SUPPLEMENT (补充数据) ===\n" + akshare_result
                         except (AkshareDataError, Exception):
                             pass
-                    # If akshare fails, return tushare result without fallback marker
-                    return tushare_result.replace("_FALLBACK_TO_AKSHARE_", "")
+
+                    # Return tushare content without fallback marker if akshare failed
+                    return tushare_content
                 else:
-                    # Tushare returned valid data, use it
+                    # Tushare returned valid data without fallback marker, use it
                     return tushare_result
             except (TushareNewsDataError, TushareDataError, TimeoutError):
                 tushare_result = None

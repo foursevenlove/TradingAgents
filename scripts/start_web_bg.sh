@@ -8,6 +8,12 @@ set -e
 PROJECT_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 cd "$PROJECT_ROOT"
 
+# ── 加载环境变量 ──────────────────────────────────────────────
+if [ -f "$PROJECT_ROOT/.env" ]; then
+    echo "加载 .env 环境变量..."
+    export $(grep -v '^#' "$PROJECT_ROOT/.env" | grep -v '^$' | xargs)
+fi
+
 LOG_DIR="$PROJECT_ROOT/logs"
 mkdir -p "$LOG_DIR"
 
