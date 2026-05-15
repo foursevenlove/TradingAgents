@@ -79,8 +79,8 @@ def get_company_news(
 ) -> str:
     """
     第一层：获取公司直接相关新闻。
-    调用 tushare news API（6源分段拉取）+ akshare stock_news_em，
-    通过公司名+股票代码关键词筛选，最多返回 20 条。
+    调用 tushare news API（6源分段拉取）+ major_news 长篇通讯，
+    通过公司名+股票代码严格实体筛选，最多返回 20 条。
     已预过滤，结果均为与公司直接相关的新闻快讯。
     参数：
         ticker (str): 股票代码
@@ -100,9 +100,9 @@ def get_industry_news(
 ) -> str:
     """
     第二层：获取产业链/行业间接相关新闻。
-    调用 tushare major_news（长篇通讯，12h分段）+ akshare 财联社，
-    通过行业关键词初筛 → LLM 精选 20 条 → LLM 生成 200-300 字摘要。
-    覆盖上下游产业链、竞争对手、行业趋势等间接相关信息。
+    调用 tushare major_news（长篇通讯，12h分段）+ tushare news 六源快讯，
+    通过行业关键词初筛、确定性排序和关系标注筛选。
+    覆盖上下游产业链、竞争对手、行业趋势等相关信息。
     参数：
         ticker (str): 股票代码
         start_date (str): 开始日期，格式：yyyy-mm-dd，默认3天前

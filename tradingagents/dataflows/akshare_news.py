@@ -34,6 +34,51 @@ def _parse_date_from_url(url: str) -> Optional[datetime]:
     return None
 
 
+def _company_keywords(ticker: str, company_name: Optional[str] = None) -> list[str]:
+    stock_code, market = _convert_ticker_format(ticker)
+    keywords = [stock_code, f"{stock_code}.{market.upper()}"]
+    if company_name:
+        keywords.append(company_name)
+        short_name = company_name
+        for suffix in ["股份有限公司", "有限责任公司", "有限公司", "集团股份", "集团", "控股"]:
+            short_name = short_name.replace(suffix, "")
+        short_name = short_name.strip()
+        if short_name and short_name != company_name:
+            keywords.append(short_name)
+    return list(dict.fromkeys([kw for kw in keywords if kw]))
+
+
+def _filter_company_entity_news(df: pd.DataFrame, keywords: list[str]) -> pd.DataFrame:
+    """Filter Akshare company news by title/content, not by the keyword column."""
+    if df.empty or not keywords:
+        return df.iloc[0:0].copy()
+
+    normalized = [kw.lower() for kw in keywords if kw]
+    code_terms = [kw for kw in normalized if re.fullmatch(r"\d{6}", kw)]
+    ticker_terms = [kw for kw in normalized if re.fullmatch(r"\d{6}\.(sh|sz)", kw)]
+    name_terms = [
+        kw for kw in normalized
+        if kw not in code_terms and kw not in ticker_terms
+    ]
+
+    def matches_row(row):
+        text = (
+            str(row.get("新闻标题", "")) + " " +
+            str(row.get("新闻内容", "")) + " " +
+            str(row.get("title", "")) + " " +
+            str(row.get("content", ""))
+        ).lower()
+        if any(keyword in text for keyword in name_terms + ticker_terms):
+            return True
+        for code in code_terms:
+            code_pattern = rf"(股票代码|证券代码|代码)[:：\s]*{code}\b|{code}\.(sh|sz)\b|(sh|sz){code}\b"
+            if re.search(code_pattern, text):
+                return True
+        return False
+
+    return df[df.apply(matches_row, axis=1)].copy()
+
+
 def get_news(
     ticker: Annotated[str, "A-share ticker symbol (e.g., 000001.SZ, 600000.SH)"],
     start_date: Optional[str] = None,
@@ -65,6 +110,15 @@ def get_news(
         if df.empty:
             return f"# News for {ticker}\nNo data available"
 
+        company_name = ""
+        if INDUSTRY_AVAILABLE:
+            try:
+                industry_info = get_sw_industry(ticker) or {}
+                company_name = industry_info.get("company_name", "")
+            except Exception:
+                company_name = ""
+        keywords = _company_keywords(ticker, company_name)
+
         # Parse date from URL and sort/filter by date descending to get newest first
         date_range_info = ""
         if "新闻链接" in df.columns:
@@ -88,11 +142,26 @@ def get_news(
             # Drop the helper column before outputting
             df = df.drop(columns=["_parsed_date"])
 
+        total_after_date = len(df)
+        df = _filter_company_entity_news(df, keywords)
+
+        df = df.rename(columns={
+            "新闻标题": "title",
+            "新闻内容": "content",
+            "发布时间": "pub_time",
+            "文章来源": "data_source",
+            "新闻链接": "url",
+            "关键词": "source_keyword",
+        })
+
         # Limit to top 20 most recent items
         df = df.head(20)
 
         header = f"# News for {ticker}\n"
+        header += f"# Company name: {company_name or 'N/A'}\n"
+        header += f"# Keywords: {keywords}\n"
         header += f"# Retrieved on: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n"
+        header += f"# Date-filtered raw: {total_after_date} | Entity filtered: {len(df)}\n"
         header += f"# Total items: {len(df)}\n"
         if date_range_info:
             header += date_range_info

@@ -203,6 +203,24 @@ def validate_company_keyword_relevance(
     )
 
 
+def validate_industry_relation_fields(
+    recorder: CheckRecorder,
+    label: str,
+    rows: list[dict[str, str]],
+) -> None:
+    if not rows:
+        recorder.ok(f"{label} relation fields", "no rows returned")
+        return
+
+    required = {"direct_or_indirect", "relation_type", "impact_path", "summary"}
+    missing = [field for field in required if field not in rows[0]]
+    recorder.require(
+        not missing,
+        f"{label} relation fields",
+        f"fields present: {sorted(required)}" if not missing else f"missing: {missing}",
+    )
+
+
 def summarize_result(label: str, raw: str, max_titles: int = 3) -> list[dict[str, str]]:
     print(f"\n[{label}]")
     for line in header_lines(raw)[:8]:
@@ -422,6 +440,7 @@ def run_live_direct_tests(
         if r2 is not None:
             rows = summarize_result("tushare industry", r2)
             validate_rows_in_range(recorder, "tushare industry", rows, start_date, end_date)
+            validate_industry_relation_fields(recorder, "tushare industry", rows)
 
         r3 = safe_call(
             "tushare get_policy_news",
@@ -490,6 +509,8 @@ def run_route_tests(
             validate_rows_in_range(recorder, label, rows, start_date, end_date)
             if label == "route get_company_news":
                 validate_company_keyword_relevance(recorder, label, raw, rows)
+            if label == "route get_industry_news":
+                validate_industry_relation_fields(recorder, label, rows)
 
 
 def derive_dates(args) -> tuple[str, str]:

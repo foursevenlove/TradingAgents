@@ -79,6 +79,9 @@ INDUSTRY_SEGMENT_HOURS = 12
 
 NEW_DAYS = 3
 
+COMPANY_NEWS_SOURCES = ['eastmoney', 'sina', '10jqka', 'cls', 'yicai', 'jinrongjie']
+INDUSTRY_FAST_NEWS_SOURCES = ['eastmoney', 'sina', '10jqka', 'cls', 'yicai', 'jinrongjie']
+
 
 class TushareDataError(Exception):
     """Exception raised for Tushare data errors."""
@@ -153,6 +156,187 @@ def _format_to_csv(df: pd.DataFrame, header_info: Optional[str] = None) -> str:
         return header_info + "\n" + csv_string
 
     return csv_string
+
+
+def _company_keywords(ticker: str, company_name: Optional[str]) -> List[str]:
+    """Build strict entity keywords for direct company news matching."""
+    stock_code = _convert_ticker_to_tushare(ticker)
+    code = stock_code.split('.')[0]
+    keywords = [stock_code, code]
+    if company_name:
+        keywords.append(company_name)
+        short_name = company_name
+        for suffix in ["股份有限公司", "有限责任公司", "有限公司", "集团股份", "集团", "控股"]:
+            short_name = short_name.replace(suffix, "")
+        short_name = short_name.strip()
+        if short_name and short_name != company_name:
+            keywords.append(short_name)
+    return list(dict.fromkeys([kw for kw in keywords if kw]))
+
+
+def _filter_company_entity_news(df: pd.DataFrame, keywords: List[str]) -> pd.DataFrame:
+    """Filter rows that explicitly mention the target company or stock code."""
+    if df.empty or not keywords:
+        return df.iloc[0:0].copy()
+
+    normalized = [kw.lower() for kw in keywords if kw]
+    code_terms = [kw for kw in normalized if re.fullmatch(r"\d{6}", kw)]
+    ticker_terms = [kw for kw in normalized if re.fullmatch(r"\d{6}\.(sh|sz)", kw)]
+    name_terms = [
+        kw for kw in normalized
+        if kw not in code_terms and kw not in ticker_terms
+    ]
+
+    def matches_row(row):
+        text = (
+            str(row.get('title', '')) + " " +
+            str(row.get('content', '')) + " " +
+            str(row.get('新闻标题', '')) + " " +
+            str(row.get('新闻内容', ''))
+        ).lower()
+        if any(keyword in text for keyword in name_terms + ticker_terms):
+            return True
+        for code in code_terms:
+            code_pattern = rf"(股票代码|证券代码|代码)[:：\s]*{code}\b|{code}\.(sh|sz)\b|(sh|sz){code}\b"
+            if re.search(code_pattern, text):
+                return True
+        return False
+
+    return df[df.apply(matches_row, axis=1)].copy()
+
+
+def _fetch_news_source(pro, src: str, start_dt_obj: datetime, end_dt_obj: datetime) -> pd.DataFrame:
+    """Fetch one Tushare news source, using segmentation for high-volume feeds."""
+    if src in SEGMENTED_SOURCES["company"]:
+        return _segmented_fetch(pro, src, start_dt_obj, end_dt_obj)
+
+    start_dt = start_dt_obj.strftime("%Y-%m-%d %H:%M:%S")
+    end_dt = end_dt_obj.strftime("%Y-%m-%d %H:%M:%S")
+    df = pro.news(src=src, start_date=start_dt, end_date=end_dt)
+    if not df.empty:
+        df['data_source'] = src
+    return df
+
+
+def _annotate_industry_relation(
+    df: pd.DataFrame,
+    ticker: str,
+    company_keywords: List[str],
+    industry_keywords: List[str],
+    expanded_keywords: List[str],
+) -> pd.DataFrame:
+    """Add deterministic relation labels for industry/supply-chain news."""
+    if df.empty:
+        return df
+
+    code = ticker.split('.')[0].lower()
+    company_terms = [kw.lower() for kw in company_keywords if kw]
+    industry_terms = [kw.lower() for kw in industry_keywords if kw]
+    expanded_terms = [kw.lower() for kw in expanded_keywords if kw]
+    macro_terms = ["政策", "监管", "央行", "降准", "降息", "lpr", "利率", "社融", "m2", "融资", "信贷", "流动性", "资本市场", "金融支持"]
+    upstream_terms = ["上游", "原材料", "设备", "供应", "采购", "成本", "价格"]
+    downstream_terms = ["下游", "需求", "客户", "消费", "订单", "销售", "房地产", "贷款"]
+    competitor_terms = ["同业", "竞争", "招商银行", "兴业银行", "平安银行", "工商银行", "建设银行", "农业银行", "中国银行"]
+    technology_terms = ["技术", "数字化", "ai", "人工智能", "系统", "平台", "创新", "产品"]
+
+    def classify(row):
+        text = (
+            str(row.get('title', '')) + " " +
+            str(row.get('content', '')) + " " +
+            str(row.get('summary', ''))
+        ).lower()
+        matched = [kw for kw in company_terms + industry_terms + expanded_terms if kw and kw in text]
+
+        if any(term in text for term in company_terms) or code in text:
+            relation_type = "company_direct"
+            direct_or_indirect = "直接"
+            impact_path = "新闻直接提及目标公司或股票代码，作为公司自身事件分析。"
+        elif any(term in text for term in macro_terms):
+            relation_type = "macro_policy"
+            direct_or_indirect = "间接"
+            impact_path = "通过宏观政策、流动性或监管环境变化传导至目标公司所在行业。"
+        elif any(term in text for term in competitor_terms):
+            relation_type = "competitor_dynamic"
+            direct_or_indirect = "间接"
+            impact_path = "通过同业竞争格局、估值锚或业务表现对目标公司形成间接影响。"
+        elif any(term in text for term in upstream_terms):
+            relation_type = "upstream_supply"
+            direct_or_indirect = "间接"
+            impact_path = "通过上游资源、资金成本、供应或价格变化影响目标公司经营条件。"
+        elif any(term in text for term in downstream_terms):
+            relation_type = "downstream_demand"
+            direct_or_indirect = "间接"
+            impact_path = "通过下游需求、客户融资或消费/投资意愿变化影响目标公司业务需求。"
+        elif any(term in text for term in technology_terms):
+            relation_type = "technology_trend"
+            direct_or_indirect = "间接"
+            impact_path = "通过行业技术、产品或数字化趋势影响目标公司中长期竞争力。"
+        else:
+            relation_type = "industry_trend"
+            direct_or_indirect = "间接"
+            impact_path = "通过行业景气、市场情绪或板块趋势对目标公司产生间接影响。"
+
+        return pd.Series({
+            "direct_or_indirect": direct_or_indirect,
+            "relation_type": relation_type,
+            "impact_path": impact_path,
+            "matched_keywords": ",".join(list(dict.fromkeys(matched[:10]))),
+        })
+
+    annotated = df.copy()
+    relation_df = annotated.apply(classify, axis=1)
+    for col in relation_df.columns:
+        annotated[col] = relation_df[col]
+    return annotated
+
+
+def _industry_data_llm_enabled() -> bool:
+    """Enable expensive data-layer LLM processing only when explicitly requested."""
+    return os.environ.get("TRADINGAGENTS_NEWS_DATA_LLM", "0").strip() == "1"
+
+
+def _rank_industry_candidates(
+    df: pd.DataFrame,
+    company_keywords: List[str],
+    industry_keywords: List[str],
+    expanded_keywords: List[str],
+) -> pd.DataFrame:
+    """Rank industry candidates deterministically to avoid LLM timeout/fallback."""
+    if df.empty:
+        return df
+
+    company_terms = [kw.lower() for kw in company_keywords if kw]
+    industry_terms = [kw.lower() for kw in industry_keywords if kw]
+    expanded_terms = [kw.lower() for kw in expanded_keywords if kw]
+    macro_terms = ["政策", "监管", "央行", "降准", "降息", "lpr", "利率", "社融", "融资", "信贷", "流动性"]
+
+    def score(row):
+        text = (
+            str(row.get('title', '')) + " " +
+            str(row.get('content', ''))
+        ).lower()
+        value = 0
+        value += 8 * sum(1 for kw in company_terms if kw in text)
+        value += 4 * sum(1 for kw in industry_terms if kw in text)
+        value += 2 * sum(1 for kw in expanded_terms if kw in text)
+        value += 2 * sum(1 for kw in macro_terms if kw in text)
+        content_len = len(_strip_html(str(row.get('content', ''))))
+        if content_len > 100:
+            value += 1
+        return value
+
+    ranked = df.copy()
+    ranked['_relevance_score'] = ranked.apply(score, axis=1)
+    sort_cols = ['_relevance_score']
+    ascending = [False]
+    if 'datetime' in ranked.columns:
+        sort_cols.append('datetime')
+        ascending.append(False)
+    elif 'pub_time' in ranked.columns:
+        sort_cols.append('pub_time')
+        ascending.append(False)
+    ranked = ranked.sort_values(sort_cols, ascending=ascending)
+    return ranked.drop(columns=['_relevance_score'])
 
 
 def _segmented_fetch(pro, src: str, start_date: datetime, end_date: datetime) -> pd.DataFrame:
@@ -711,7 +895,7 @@ def get_company_news(
 ) -> str:
     """第一层：获取公司直接相关新闻。
 
-    调用 tushare news API（6源分段拉取）+ akshare stock_news_em，
+    调用 tushare news API（6源分段拉取）+ major_news 长篇通讯，
     通过公司名+股票代码关键词筛选，最多返回 20 条。
     """
     try:
@@ -719,9 +903,7 @@ def get_company_news(
         stock_code = _convert_ticker_to_tushare(ticker)
 
         company_name = _get_stock_name_from_code(ticker)
-        keywords = [stock_code.split('.')[0]]
-        if company_name:
-            keywords.append(company_name)
+        keywords = _company_keywords(stock_code, company_name)
 
         if end_date is None:
             end_date = datetime.now().strftime("%Y-%m-%d")
@@ -731,20 +913,23 @@ def get_company_news(
         start_dt = f"{start_date} 00:00:00"
         end_dt = f"{end_date} 23:59:59"
 
-        company_news_sources = ['eastmoney', 'sina', '10jqka', 'cls', 'yicai', 'jinrongjie']
         all_news = []
 
         start_dt_obj = datetime.strptime(start_dt, "%Y-%m-%d %H:%M:%S")
         end_dt_obj = datetime.strptime(end_dt, "%Y-%m-%d %H:%M:%S")
 
-        for src in company_news_sources:
+        try:
+            major_df = _segmented_fetch_major(pro, start_dt_obj, end_dt_obj)
+            if not major_df.empty:
+                if 'content' in major_df.columns:
+                    major_df['content'] = major_df['content'].apply(_strip_html)
+                all_news.append(major_df)
+        except Exception:
+            pass
+
+        for src in COMPANY_NEWS_SOURCES:
             try:
-                if src in SEGMENTED_SOURCES["company"]:
-                    df = _segmented_fetch(pro, src, start_dt_obj, end_dt_obj)
-                else:
-                    df = pro.news(src=src, start_date=start_dt, end_date=end_dt)
-                    if not df.empty:
-                        df['data_source'] = src
+                df = _fetch_news_source(pro, src, start_dt_obj, end_dt_obj)
                 if not df.empty:
                     all_news.append(df)
             except Exception:
@@ -753,7 +938,7 @@ def get_company_news(
         if all_news:
             merged_df = pd.concat(all_news, ignore_index=True)
             merged_df = merged_df.drop_duplicates(subset=['title'], keep='first')
-            filtered_df = _filter_by_keywords(merged_df, keywords)
+            filtered_df = _filter_company_entity_news(merged_df, keywords)
 
             if 'datetime' in filtered_df.columns:
                 filtered_df = filtered_df.sort_values('datetime', ascending=False)
@@ -781,15 +966,15 @@ def get_company_news(
             header += f"# Total raw: {len(merged_df)} | Keyword hits: {len(keyword_results)}\n"
             header += f"# Final: {len(final_df)}\n"
 
-            if len(final_df) >= TARGET_COUNT:
+            if len(final_df) >= 10:
                 return _format_to_csv(final_df, header)
-            return _format_to_csv(final_df, header) + "\n_FALLBACK_TO_AKSHARE_"
+            return _format_to_csv(final_df, header) + "\n# _FALLBACK_TO_AKSHARE_"
 
         else:
             header = f"# 第一层 · 公司直接相关新闻 ({ticker})\n"
             header += f"# Date range: {start_date} to {end_date}\n"
             header += f"# NOTE: Tushare returned no news, falling back to akshare.\n"
-            return header + "\n_FALLBACK_TO_AKSHARE_"
+            return header + "\n# _FALLBACK_TO_AKSHARE_"
 
     except TushareDataError as e:
         raise e
@@ -804,8 +989,8 @@ def get_industry_news(
 ) -> str:
     """第二层：获取产业链/行业间接相关新闻。
 
-    调用 tushare major_news（长篇通讯，12h 分段）+ akshare 财联社，
-    通过行业关键词初筛 → LLM 精选 20 条 → LLM 生成 200-300 字摘要。
+    调用 tushare major_news（长篇通讯，12h 分段）+ news 六源快讯，
+    通过行业关键词初筛、确定性排序和关系标注筛选。
     """
     try:
         pro = _get_pro_api()
@@ -849,40 +1034,43 @@ def get_industry_news(
         except Exception:
             pass
 
-        # 2. 财联社快讯（cls）作为补充
-        try:
-            cls_df = pro.news(src='cls', start_date=start_dt, end_date=end_dt)
-            if not cls_df.empty:
-                cls_df['data_source'] = 'cls'
-                all_news.append(cls_df)
-        except Exception:
-            pass
+        # 2. news 快讯池作为行业/上下游补充。这里允许其他公司新闻进入候选，
+        # 但后续必须标注为间接影响，不能混作公司直接新闻。
+        for src in INDUSTRY_FAST_NEWS_SOURCES:
+            try:
+                fast_df = _fetch_news_source(pro, src, start_dt_obj, end_dt_obj)
+                if not fast_df.empty:
+                    all_news.append(fast_df)
+            except Exception:
+                pass
 
         if not all_news:
             header = f"# 第二层 · 产业链/行业新闻 ({ticker})\n"
             header += f"# Industry: {industry_context}\n"
             header += f"# Date range: {start_date} to {end_date}\n"
             header += f"# NOTE: Tushare returned no industry news, falling back to akshare.\n"
-            return header + "\n_FALLBACK_TO_AKSHARE_"
+            return header + "\n# _FALLBACK_TO_AKSHARE_"
 
         merged_df = pd.concat(all_news, ignore_index=True)
         merged_df = merged_df.drop_duplicates(subset=['title'], keep='first')
 
         # === 关键词扩展 + 初筛 ===
-        # 1. 基础关键词：公司名 + 股票代码 + 行业
-        code = ticker.split('.')[0]
-        base_keywords = [code]
-        if company_name:
-            base_keywords.append(company_name)
+        # 1. 基础关键词：公司实体 + 行业
+        company_entity_keywords = _company_keywords(ticker, company_name)
+        base_keywords = company_entity_keywords.copy()
         if industry_keywords:
             base_keywords.extend(industry_keywords)
 
-        # 2. LLM 生成扩展关键词（上下游/竞争/技术等）
-        expanded = _llm_expand_keywords(
-            ticker=ticker,
-            company_name=company_name or ticker,
-            industry_context=industry_context,
-        )
+        # 2. 可选 LLM 生成扩展关键词（上下游/竞争/技术等）。
+        # 默认关闭，避免数据层多次 LLM 调用导致 route_to_vendor 超时。
+        if _industry_data_llm_enabled():
+            expanded = _llm_expand_keywords(
+                ticker=ticker,
+                company_name=company_name or ticker,
+                industry_context=industry_context,
+            )
+        else:
+            expanded = []
 
         all_keywords = list(dict.fromkeys(base_keywords + expanded))  # 去重保持顺序
 
@@ -897,6 +1085,13 @@ def get_industry_news(
         elif 'pub_time' in filtered_df.columns:
             filtered_df = filtered_df.sort_values('pub_time', ascending=False)
 
+        filtered_df = _rank_industry_candidates(
+            filtered_df,
+            company_keywords=company_entity_keywords,
+            industry_keywords=industry_keywords,
+            expanded_keywords=expanded,
+        )
+
         TARGET_COUNT = 20
 
         if filtered_df.empty:
@@ -907,10 +1102,10 @@ def get_industry_news(
             header += f"# Total raw: {len(merged_df)} | Keyword filtered: 0 | Selected: 0\n"
             header += "# Final: 0 (LLM summarized)\n"
             header += "# NOTE: Tushare returned no industry-relevant news after keyword filtering, falling back to akshare.\n"
-            return header + "\nNo data available\n_FALLBACK_TO_AKSHARE_"
+            return header + "\nNo data available\n# _FALLBACK_TO_AKSHARE_"
 
-        # 4. LLM 精选
-        if len(filtered_df) > TARGET_COUNT:
+        # 4. 精选候选。默认用确定性评分；显式开启时使用 LLM 精选。
+        if _industry_data_llm_enabled() and len(filtered_df) > TARGET_COUNT:
             selected_indices = _llm_select_industry_news(
                 ticker=ticker,
                 company_name=company_name or ticker,
@@ -923,17 +1118,45 @@ def get_industry_news(
             else:
                 selected_df = filtered_df.head(TARGET_COUNT)
         else:
-            selected_df = filtered_df.copy()
+            selected_df = filtered_df.head(TARGET_COUNT).copy()
 
-        # LLM 生成摘要
-        summarized_df = _llm_summarize_news(
-            articles_df=selected_df,
+        # 可选 LLM 摘要；默认用正文截断，最终报告由新闻分析师统一归纳。
+        if _industry_data_llm_enabled():
+            summarized_df = _llm_summarize_news(
+                articles_df=selected_df,
+                ticker=ticker,
+                industry_context=industry_context,
+            )
+            summary_mode = "LLM summarized"
+        else:
+            summarized_df = selected_df.copy()
+            if 'content' in summarized_df.columns:
+                summarized_df['summary'] = summarized_df['content'].apply(lambda x: _strip_html(str(x))[:300])
+            elif 'title' in summarized_df.columns:
+                summarized_df['summary'] = summarized_df['title'].apply(lambda x: _strip_html(str(x))[:300])
+            else:
+                summarized_df['summary'] = ""
+            summary_mode = "deterministic ranked"
+
+        summarized_df = _annotate_industry_relation(
+            summarized_df,
             ticker=ticker,
-            industry_context=industry_context,
+            company_keywords=company_entity_keywords,
+            industry_keywords=industry_keywords,
+            expanded_keywords=expanded,
         )
 
-        # 只保留需要的列：title, datetime, data_source, summary
-        output_cols = ['title', 'datetime', 'data_source', 'summary']
+        # 只保留需要的列：title, datetime, data_source, relation fields, summary
+        output_cols = [
+            'title',
+            'datetime',
+            'data_source',
+            'direct_or_indirect',
+            'relation_type',
+            'impact_path',
+            'matched_keywords',
+            'summary',
+        ]
         available_cols = [c for c in output_cols if c in summarized_df.columns]
         if not available_cols:
             available_cols = summarized_df.columns.tolist()
@@ -945,7 +1168,7 @@ def get_industry_news(
         header += f"# Keywords ({len(all_keywords)}): {all_keywords[:15]}{'...' if len(all_keywords) > 15 else ''}\n"
         header += f"# Date range: {start_date} to {end_date}\n"
         header += f"# Total raw: {len(merged_df)} | Keyword filtered: {len(filtered_df)} | Selected: {len(selected_df)}\n"
-        header += f"# Final: {len(final_df)} (LLM summarized)\n"
+        header += f"# Final: {len(final_df)} ({summary_mode})\n"
 
         return _format_to_csv(final_df, header)
 
@@ -1005,7 +1228,7 @@ def get_policy_news(
             header = f"# 第三层 · 政策新闻 ({ticker})\n"
             header += f"# Date range: {(end_day - timedelta(days=look_back_days-1)).strftime('%Y-%m-%d')} to {end_day.strftime('%Y-%m-%d')}\n"
             header += f"# No CCTV news broadcast data available for the past {look_back_days} days; falling back to akshare.\n"
-            return header + "No data available\n_FALLBACK_TO_AKSHARE_"
+            return header + "No data available\n# _FALLBACK_TO_AKSHARE_"
 
         merged_df = pd.concat(all_cctv, ignore_index=True)
 
