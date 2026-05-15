@@ -2,14 +2,14 @@
 
 ## Project Structure & Module Organization
 
-`tradingagents/` contains the core Python package: agent roles live under `agents/`, graph orchestration under `graph/`, data providers under `dataflows/`, LLM adapters under `llm_clients/`, and A-share rules under `market_rules/`. `cli/` provides the Typer command entry point installed as `tradingagents`. The web app is split into `web/backend/` for FastAPI services and `web/frontend/` for Vue 3, Vite, and Tailwind UI. Root-level `test_*.py` files are the current test suite. Documentation and images live in `docs/` and `assets/`.
+`tradingagents/` contains the core package: agent roles live under `agents/`, graph orchestration under `graph/`, data providers under `dataflows/`, LLM adapters under `llm_clients/`, and A-share rules under `market_rules/`. `cli/` provides the Typer entry point. The web app is split into `web/backend/` for FastAPI and `web/frontend/` for Vue 3, Vite, and Tailwind. Root-level `test_*.py` files are the current test suite. Docs and images live in `docs/` and `assets/`.
 
 ## Build, Test, and Development Commands
 
-- `pip install -r requirements.txt`: install Python dependencies for local development.
-- `pip install -e .`: install the package and CLI in editable mode.
-- `python -m cli.main` or `tradingagents`: start the interactive analysis CLI.
-- `pytest test_news_analyst.py` or `pytest test_*.py`: run focused or full root-level tests.
+- Use the `tradingagents` conda environment for Python work, e.g. `conda run -n tradingagents python test_news_pipeline.py`.
+- `conda run -n tradingagents python -m pip install -r requirements.txt`: install Python dependencies.
+- `conda run -n tradingagents python -m cli.main`: start the CLI.
+- `conda run -n tradingagents pytest test_news_analyst.py` or `conda run -n tradingagents pytest test_*.py`: run focused or full tests.
 - `./scripts/start_web.sh`: build/start the FastAPI + Vue web UI at `http://localhost:8000`.
 - `uvicorn web.backend.app:app --reload --port 8000`: run only the backend.
 - `cd web/frontend && npm install && npm run dev`: run the frontend dev server.

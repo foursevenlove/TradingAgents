@@ -78,7 +78,7 @@ def main():
     state = propagator.create_initial_state(ticker, trade_date)
     state["messages"] = [HumanMessage(content=ticker)]
 
-    max_rounds = 2
+    max_rounds = 4
     for i in range(max_rounds):
         print(f"\n[Round {i+1}] Analyst node running...")
         result = analyst_node(state)
@@ -119,7 +119,9 @@ def main():
                     output = out_str
                 print(f"  ✓ Success ({len(out_str)} chars)")
 
-            tool_messages.append(ToolMessage(content=str(output), tool_call_id=tool_id))
+            tool_messages.append(
+                ToolMessage(content=str(output), tool_call_id=tool_id, name=tool_name)
+            )
 
         state["messages"] = state["messages"] + tool_messages
 

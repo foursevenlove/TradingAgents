@@ -1,31 +1,83 @@
+from datetime import datetime, timedelta
+import uuid
+
 from langchain_core.prompts import ChatPromptTemplate, MessagesPlaceholder
-import time
-import json
+from langchain_core.messages import AIMessage
+
 from tradingagents.agents.utils.agent_utils import (
     get_company_news,
     get_industry_news,
     get_policy_news,
 )
-from tradingagents.dataflows.config import get_config
+
+
+REQUIRED_NEWS_TOOLS = ("get_company_news", "get_industry_news", "get_policy_news")
+
+
+def _get_news_date_range(trade_date: str) -> tuple[str, str]:
+    """Return the 3-day lookback window ending at trade_date."""
+    end_day = datetime.strptime(str(trade_date)[:10], "%Y-%m-%d")
+    start_day = end_day - timedelta(days=3)
+    return start_day.strftime("%Y-%m-%d"), end_day.strftime("%Y-%m-%d")
+
+
+def _executed_news_tools(messages) -> set[str]:
+    """Infer completed news tool names from ToolMessages and prior AI tool calls."""
+    tool_call_names = {}
+    executed = set()
+
+    for message in messages:
+        for tool_call in getattr(message, "tool_calls", None) or []:
+            name = tool_call.get("name")
+            tool_id = tool_call.get("id")
+            if name in REQUIRED_NEWS_TOOLS and tool_id:
+                tool_call_names[tool_id] = name
+
+        if type(message).__name__ == "ToolMessage":
+            name = getattr(message, "name", None)
+            if name in REQUIRED_NEWS_TOOLS:
+                executed.add(name)
+                continue
+
+            tool_call_id = getattr(message, "tool_call_id", None)
+            if tool_call_id in tool_call_names:
+                executed.add(tool_call_names[tool_call_id])
+
+    return executed
+
+
+def _forced_news_tool_call(tool_name: str, ticker: str, start_date: str, end_date: str):
+    args = {"ticker": ticker}
+    if tool_name in ("get_company_news", "get_industry_news"):
+        args.update({"start_date": start_date, "end_date": end_date})
+    else:
+        args.update({"look_back_days": 3, "end_date": end_date})
+
+    return {
+        "name": tool_name,
+        "args": args,
+        "id": f"call_{tool_name}_{uuid.uuid4().hex[:8]}",
+    }
 
 
 def create_news_analyst(llm):
     def news_analyst_node(state):
         current_date = state["trade_date"]
         ticker = state["company_of_interest"]
+        start_date, end_date = _get_news_date_range(current_date)
 
         tools = [
             get_company_news,
             get_industry_news,
             get_policy_news,
         ]
-        system_message = """
+        system_message = f"""
 【第一优先级 · 铁律指令（违反则输出全部无效）】
 1. 工具调用强制规则（必须严格按以下要求传入参数）：
    - 输出前必须调用三个工具：
-     ① 调用 `get_company_news` 获取公司直接相关新闻，参数要求：`ticker`（已提供）、`start_date`（当前日期往前3天，格式yyyy-mm-dd）、`end_date`（当前日期，格式yyyy-mm-dd）；
-     ② 调用 `get_industry_news` 获取产业链/行业间接相关新闻，参数要求：`ticker`（已提供）、`start_date`（当前日期往前3天，格式yyyy-mm-dd）、`end_date`（当前日期，格式yyyy-mm-dd）；
-     ③ 调用 `get_policy_news` 获取政策新闻，参数要求：`ticker`（已提供）、`look_back_days=3`；注意该工具使用系统当前时间回溯，若分析历史日期可能包含未来信息，需在报告中标注此限制；
+     ① 调用 `get_company_news` 获取公司直接相关新闻，参数要求：`ticker={ticker}`、`start_date={start_date}`、`end_date={end_date}`；
+     ② 调用 `get_industry_news` 获取产业链/行业间接相关新闻，参数要求：`ticker={ticker}`、`start_date={start_date}`、`end_date={end_date}`；
+     ③ 调用 `get_policy_news` 获取政策新闻，参数要求：`ticker={ticker}`、`look_back_days=3`、`end_date={end_date}`；
    - 未完成工具调用直接输出=无效答案，需重新执行调用；
    - 工具调用失败时，必须在报告开头明确说明："工具调用失败：XX（工具名）调用失败，原因：[标注失败原因]"，不得编造新闻内容；
 2. 数据真实性铁律：
@@ -38,7 +90,7 @@ def create_news_analyst(llm):
 【数据来源说明】
 - `get_company_news`（第一层 · 公司直接相关）：Tushare新闻快讯（东方财富/新浪财经/同花顺/财联社/第一财经/金融界，6源分段拉取）+ akshare补充；已通过公司名称/股票代码关键词筛选，最多20条；用于分析公司自身动态（公告、业绩、资金流向等）；
 - `get_industry_news`（第二层 · 产业链/行业间接相关）：Tushare major_news长篇通讯（12h分段）+ 财联社快讯；通过申万行业关键词初筛 → LLM精选20条 → LLM生成200-300字摘要；覆盖上下游产业链、竞争对手、行业趋势；摘要已浓缩关键信息，可直接引用分析；
-- `get_policy_news`（第三层 · 政策/宏观）：Tushare新闻联播文字稿（近3天），LLM已筛选与目标行业相关的政策条目；纯官方政策内容，用于政策导向分析。注意：该工具基于系统当前时间回溯，分析历史日期时可能包含未来信息；
+- `get_policy_news`（第三层 · 政策/宏观）：Tushare新闻联播文字稿（截至分析日期近3天），LLM已筛选与目标行业相关的政策条目；纯官方政策内容，用于政策导向分析；
 
 【角色定位】
 你是专注中国A股市场的新闻分析师，基于三层工具返回的真实新闻数据，结合A股政策市、散户主导等特性，撰写精细的新闻影响分析报告，为交易者提供可落地的决策依据。
@@ -103,6 +155,21 @@ def create_news_analyst(llm):
 
         chain = prompt | llm.bind_tools(tools)
         result = chain.invoke(state["messages"])
+
+        if len(result.tool_calls) == 0:
+            executed_tools = _executed_news_tools(state.get("messages", []))
+            missing_tools = [
+                name for name in REQUIRED_NEWS_TOOLS if name not in executed_tools
+            ]
+            if missing_tools:
+                forced_calls = [
+                    _forced_news_tool_call(name, ticker, start_date, end_date)
+                    for name in missing_tools
+                ]
+                return {
+                    "messages": [AIMessage(content="", tool_calls=forced_calls)],
+                    "news_report": "",
+                }
 
         report = ""
 

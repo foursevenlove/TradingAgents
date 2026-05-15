@@ -63,16 +63,24 @@ def get_news(
         df = ak.stock_news_em(symbol=news_symbol)
 
         if df.empty:
-            return f"No news found for {ticker}"
+            return f"# News for {ticker}\nNo data available"
 
-        # Parse date from URL and sort by date descending to get newest first
+        # Parse date from URL and sort/filter by date descending to get newest first
         date_range_info = ""
         if "新闻链接" in df.columns:
             df["_parsed_date"] = df["新闻链接"].apply(_parse_date_from_url)
+            df["_parsed_date"] = pd.to_datetime(df["_parsed_date"], errors="coerce")
             # Drop rows where date parsing failed
             df = df.dropna(subset=["_parsed_date"])
+            if start_date:
+                start_dt = datetime.strptime(start_date, "%Y-%m-%d")
+                df = df[df["_parsed_date"] >= start_dt]
+            if end_date:
+                end_dt = datetime.strptime(end_date, "%Y-%m-%d")
+                df = df[df["_parsed_date"] <= end_dt]
             # Sort by parsed date descending (newest first)
             df = df.sort_values("_parsed_date", ascending=False)
+            df["datetime"] = df["_parsed_date"].dt.strftime("%Y-%m-%d")
             # Record date range before dropping helper column
             dates = df["_parsed_date"]
             if not dates.empty:
@@ -236,7 +244,7 @@ def get_industry_news(
         # 财联社全球财经新闻
         df = ak.stock_info_global_cls()
         if df.empty:
-            return f"# 第二层 · 产业链/行业新闻 ({ticker}) — akshare fallback\n# No industry news available from akshare\n"
+            return f"# 第二层 · 产业链/行业新闻 ({ticker}) — akshare fallback\nNo data available\n"
 
         # 重命名列
         df = df.rename(columns={
@@ -246,6 +254,17 @@ def get_industry_news(
             "发布时间": "Time",
         })
         df['data_source'] = 'akshare_cls'
+
+        if start_date or end_date:
+            date_col = "Date" if "Date" in df.columns else None
+            if date_col:
+                parsed_dates = pd.to_datetime(df[date_col], errors="coerce")
+                mask = parsed_dates.notna()
+                if start_date:
+                    mask &= parsed_dates >= pd.to_datetime(start_date)
+                if end_date:
+                    mask &= parsed_dates <= pd.to_datetime(end_date)
+                df = df[mask].copy()
 
         # 行业关键词过滤
         if industry_keywords:
@@ -276,6 +295,7 @@ def get_industry_news(
 def get_policy_news(
     ticker: Annotated[str, "A-share ticker symbol"],
     look_back_days: Annotated[int, "回溯天数"] = 3,
+    end_date: Annotated[str, "截止日期，格式：yyyy-mm-dd"] = None,
 ) -> str:
     """第三层 fallback：akshare 政策新闻。
 
@@ -283,10 +303,13 @@ def get_policy_news(
     """
     try:
         all_cctv = []
-        today = datetime.now()
+        if end_date:
+            end_day = datetime.strptime(end_date, "%Y-%m-%d")
+        else:
+            end_day = datetime.now()
 
         for i in range(look_back_days):
-            date = today - timedelta(days=i)
+            date = end_day - timedelta(days=i)
             date_str = date.strftime("%Y%m%d")
             try:
                 df = ak.news_cctv(date=date_str)
@@ -297,12 +320,15 @@ def get_policy_news(
                 continue
 
         if not all_cctv:
-            return f"# 第三层 · 政策新闻 ({ticker}) — akshare fallback\n# No CCTV data available\n"
+            header = f"# 第三层 · 政策新闻 ({ticker}) — akshare fallback\n"
+            header += f"# Date range: {(end_day - timedelta(days=look_back_days-1)).strftime('%Y-%m-%d')} to {end_day.strftime('%Y-%m-%d')}\n"
+            header += "No data available\n"
+            return header
 
         merged = pd.concat(all_cctv, ignore_index=True)
 
         header = f"# 第三层 · 政策新闻 ({ticker}) — akshare fallback\n"
-        header += f"# Date range: {(today - timedelta(days=look_back_days-1)).strftime('%Y-%m-%d')} to {today.strftime('%Y-%m-%d')}\n"
+        header += f"# Date range: {(end_day - timedelta(days=look_back_days-1)).strftime('%Y-%m-%d')} to {end_day.strftime('%Y-%m-%d')}\n"
         header += f"# Total items: {len(merged)}\n"
         header += f"# Note: Fallback data, no LLM filtering\n"
 

@@ -22,4 +22,5 @@ langchain-google-genai
 fastapi>=0.115.0
 uvicorn[standard]>=0.32.0
 akshare>=1.12.0
+tushare>=1.4.21
 croniter>=2.0.0

@@ -117,6 +117,7 @@ def get_industry_news(
 def get_policy_news(
     ticker: Annotated[str, "股票代码"],
     look_back_days: Annotated[int, "回溯天数，默认3天"] = 3,
+    end_date: Annotated[str, "截止日期，格式：yyyy-mm-dd；默认当天"] = None,
 ) -> str:
     """
     第三层：获取政策/宏观新闻。
@@ -125,7 +126,8 @@ def get_policy_news(
     参数：
         ticker (str): 股票代码
         look_back_days (int): 回溯天数，默认为3天
+        end_date (str): 截止日期，格式：yyyy-mm-dd，默认当天
     返回：
         str: 包含政策新闻的格式化字符串（CSV格式）
     """
-    return route_to_vendor("get_policy_news", ticker, look_back_days)
+    return route_to_vendor("get_policy_news", ticker, look_back_days, end_date)

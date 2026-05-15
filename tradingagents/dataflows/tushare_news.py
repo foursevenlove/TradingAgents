@@ -143,6 +143,8 @@ def _get_stock_name_from_code(stock_code: str) -> Optional[str]:
 def _format_to_csv(df: pd.DataFrame, header_info: Optional[str] = None) -> str:
     """Format DataFrame to CSV string with optional header."""
     if df.empty:
+        if header_info:
+            return header_info + "\nNo data available"
         return "No data available"
 
     csv_string = df.to_csv(index=False)
@@ -284,8 +286,7 @@ def _llm_select_relevant_news(
 
     llm = _get_filter_llm()
     if llm is None:
-        # Fallback: return first N candidates by index
-        return candidates_df.head(target_count).index.tolist()
+        return []
 
     # Build numbered candidate list (limit to 150 to control token usage)
     candidate_rows = candidates_df.head(200)
@@ -335,8 +336,7 @@ def _llm_select_relevant_news(
                 selected.append(index_map[n])
         return selected[:target_count]
     except Exception:
-        # Fallback: return first N candidates by index
-        return candidates_df.head(target_count).index.tolist()
+        return []
 
 
 def _llm_expand_keywords(
@@ -667,7 +667,7 @@ def _llm_filter_policy_news(
 
         if selected:
             return cctv_df.loc[cctv_df.index.isin(selected)]
-        return cctv_df
+        return cctv_df.iloc[0:0].copy()
     except Exception:
         return cctv_df
 
@@ -772,38 +772,13 @@ def get_company_news(
                 return _format_to_csv(final_df, header)
 
             keyword_results = filtered_df.copy()
-            excluded_indices = set(keyword_results.index)
-            candidate_df = merged_df[~merged_df.index.isin(excluded_indices)].copy()
-
-            if 'datetime' in candidate_df.columns:
-                candidate_df = candidate_df.sort_values('datetime', ascending=False)
-            elif 'pub_time' in candidate_df.columns:
-                candidate_df = candidate_df.sort_values('pub_time', ascending=False)
-
-            need_count = TARGET_COUNT - len(keyword_results)
-
-            if not candidate_df.empty and need_count > 0:
-                selected_indices = _llm_select_relevant_news(
-                    ticker=ticker,
-                    company_name=company_name or ticker,
-                    candidates_df=candidate_df,
-                    target_count=need_count,
-                )
-                if selected_indices:
-                    llm_supplement = candidate_df.loc[candidate_df.index.isin(selected_indices)]
-                    final_df = pd.concat([keyword_results, llm_supplement], ignore_index=True)
-                else:
-                    final_df = keyword_results
-            else:
-                final_df = keyword_results
+            final_df = keyword_results
 
             header = f"# 第一层 · 公司直接相关新闻 ({ticker})\n"
             header += f"# Company name: {company_name or 'N/A'}\n"
             header += f"# Date range: {start_date} to {end_date}\n"
             header += f"# Keywords: {keywords}\n"
             header += f"# Total raw: {len(merged_df)} | Keyword hits: {len(keyword_results)}\n"
-            if len(final_df) > len(keyword_results):
-                header += f"# LLM supplement: {len(final_df) - len(keyword_results)}\n"
             header += f"# Final: {len(final_df)}\n"
 
             if len(final_df) >= TARGET_COUNT:
@@ -924,6 +899,16 @@ def get_industry_news(
 
         TARGET_COUNT = 20
 
+        if filtered_df.empty:
+            header = f"# 第二层 · 产业链/行业新闻 ({ticker})\n"
+            header += f"# Company: {company_name or 'N/A'} | Industry: {industry_context}\n"
+            header += f"# Keywords ({len(all_keywords)}): {all_keywords[:15]}{'...' if len(all_keywords) > 15 else ''}\n"
+            header += f"# Date range: {start_date} to {end_date}\n"
+            header += f"# Total raw: {len(merged_df)} | Keyword filtered: 0 | Selected: 0\n"
+            header += "# Final: 0 (LLM summarized)\n"
+            header += "# NOTE: Tushare returned no industry-relevant news after keyword filtering, falling back to akshare.\n"
+            return header + "\nNo data available\n_FALLBACK_TO_AKSHARE_"
+
         # 4. LLM 精选
         if len(filtered_df) > TARGET_COUNT:
             selected_indices = _llm_select_industry_news(
@@ -973,6 +958,7 @@ def get_industry_news(
 def get_policy_news(
     ticker: Annotated[str, "A-share ticker symbol"],
     look_back_days: Annotated[int, "回溯天数，默认3天"] = NEW_DAYS,
+    end_date: Annotated[str, "截止日期，格式：yyyy-mm-dd"] = None,
 ) -> str:
     """第三层：获取政策/宏观新闻。
 
@@ -995,12 +981,16 @@ def get_policy_news(
         level_2 = industry_info.get('level_2', '')
         industry_context = ' / '.join([w for w in [level_1, level_2] if w and w != '未知'])
 
+        if end_date:
+            end_day = datetime.strptime(end_date, "%Y-%m-%d")
+        else:
+            end_day = datetime.now()
+
         # 拉取 CCTV 新闻
         all_cctv = []
-        today = datetime.now()
 
         for i in range(look_back_days):
-            date = today - timedelta(days=i)
+            date = end_day - timedelta(days=i)
             date_str = date.strftime("%Y%m%d")
 
             try:
@@ -1012,7 +1002,10 @@ def get_policy_news(
                 continue
 
         if not all_cctv:
-            return f"# 第三层 · 政策新闻 ({ticker})\n# No CCTV news broadcast data available for the past {look_back_days} days\n"
+            header = f"# 第三层 · 政策新闻 ({ticker})\n"
+            header += f"# Date range: {(end_day - timedelta(days=look_back_days-1)).strftime('%Y-%m-%d')} to {end_day.strftime('%Y-%m-%d')}\n"
+            header += f"# No CCTV news broadcast data available for the past {look_back_days} days; falling back to akshare.\n"
+            return header + "No data available\n_FALLBACK_TO_AKSHARE_"
 
         merged_df = pd.concat(all_cctv, ignore_index=True)
 
@@ -1029,7 +1022,7 @@ def get_policy_news(
 
         header = f"# 第三层 · 政策新闻 ({ticker})\n"
         header += f"# Company: {company_name or 'N/A'} | Industry: {industry_context or 'N/A'}\n"
-        header += f"# Date range: {(today - timedelta(days=look_back_days-1)).strftime('%Y-%m-%d')} to {today.strftime('%Y-%m-%d')}\n"
+        header += f"# Date range: {(end_day - timedelta(days=look_back_days-1)).strftime('%Y-%m-%d')} to {end_day.strftime('%Y-%m-%d')}\n"
         header += f"# Total CCTV items: {len(merged_df)} | Relevant: {len(filtered_df)}\n"
 
         return _format_to_csv(filtered_df, header)

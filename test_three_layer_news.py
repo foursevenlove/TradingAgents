@@ -89,7 +89,7 @@ def main():
 
     # 第三层
     print("\n[调用 get_policy_news ...]")
-    r3 = route_to_vendor("get_policy_news", ticker, 3)
+    r3 = route_to_vendor("get_policy_news", ticker, 3, end_date)
     print_layer("第三层 · 政策新闻", r3)
 
     print(f"\n{'='*70}")

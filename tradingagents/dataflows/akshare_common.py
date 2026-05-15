@@ -95,6 +95,8 @@ def _format_to_csv(df: pd.DataFrame, header_info: Optional[str] = None) -> str:
         CSV string
     """
     if df.empty:
+        if header_info:
+            return header_info + "\nNo data available"
         return "No data available"
 
     csv_string = df.to_csv(index=False)
