@@ -42,6 +42,7 @@
 | `TRADINGAGENTS_CORS_ORIGINS` | CORS 允许来源（逗号分隔） | `*` |
 | `TRADINGAGENTS_API_KEY` | API 认证密钥 | 无（不认证） |
 | `DASHSCOPE_API_KEY` | Alibaba Bailian API Key | 无 |
+| `ALIYUN_CODING_PLAN_API_KEY` | Alibaba Cloud Coding Plan API Key | 无 |
 | `OPENAI_API_KEY` | OpenAI API Key | 无 |
 
 ### 配置文件
@@ -52,6 +53,7 @@
 # LLM Provider (选择一个)
 MINIMAX_API_KEY=your_minimax_api_key
 # DASHSCOPE_API_KEY=your_dashscope_key
+# ALIYUN_CODING_PLAN_API_KEY=your_coding_plan_key
 
 # Data Source
 TUSHARE_TOKEN=your_tushare_token

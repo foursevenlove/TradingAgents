@@ -186,6 +186,7 @@ def classify_exception(exc: Exception) -> TradingAgentsError:
     llm_indicators = [
         "api_key", "rate_limit", "model", "token", "llm",
         "openai", "anthropic", "minimax", "dashscope", "alibaba",
+        "aliyun_coding_plan", "coding_plan",
         "connection refused", "timeout", "503", "502", "429",
     ]
     if any(ind in exc_str.lower() for ind in llm_indicators):

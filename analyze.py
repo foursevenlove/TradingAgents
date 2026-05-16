@@ -42,6 +42,11 @@ DEFAULT_MODELS = {
         "deep": "MiniMax-M2.7",
         "url": "https://api.minimax.chat/v1"
     },
+    "aliyun_coding_plan": {
+        "shallow": "kimi-k2.5",
+        "deep": "kimi-k2.5",
+        "url": "https://coding.dashscope.aliyuncs.com/v1"
+    },
 }
 
 

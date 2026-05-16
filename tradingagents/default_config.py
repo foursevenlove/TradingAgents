@@ -47,6 +47,7 @@ DEFAULT_CONFIG = {
     "llm_timeout": {
         "minimax": 300,
         "alibaba": 180,
+        "aliyun_coding_plan": 180,
         "openai": 120,
         "anthropic": 120,
         "google": 120,

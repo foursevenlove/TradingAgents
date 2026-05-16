@@ -316,6 +316,7 @@ async def health_check():
         key_envs = {
             "minimax": "MINIMAX_API_KEY",
             "alibaba": "DASHSCOPE_API_KEY",
+            "aliyun_coding_plan": "ALIYUN_CODING_PLAN_API_KEY",
             "openai": "OPENAI_API_KEY",
             "anthropic": "ANTHROPIC_API_KEY",
             "google": "GOOGLE_API_KEY",
@@ -325,6 +326,8 @@ async def health_check():
             return "ok"
         # Check fallback envs
         if provider == "alibaba" and os.environ.get("ALIBABA_API_KEY"):
+            return "ok"
+        if provider == "aliyun_coding_plan" and os.environ.get("CODING_PLAN_API_KEY"):
             return "ok"
         return f"missing_api_key ({env})"
 

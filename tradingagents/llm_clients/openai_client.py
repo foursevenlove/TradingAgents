@@ -67,10 +67,15 @@ class OpenAIClient(BaseLLMClient):
         # Get API key from environment
         if self.provider not in ("ollama",):
             api_key_env = config.get("api_key_env")
+            api_key_envs = []
             if api_key_env:
-                api_key = os.environ.get(api_key_env)
+                api_key_envs.append(api_key_env)
+            api_key_envs.extend(config.get("api_key_env_aliases", []))
+            for env_name in api_key_envs:
+                api_key = os.environ.get(env_name)
                 if api_key:
                     llm_kwargs["api_key"] = api_key
+                    break
 
         for key in ("timeout", "max_retries", "reasoning_effort", "api_key", "callbacks", "http_client", "http_async_client", "temperature"):
             if key in self.kwargs:

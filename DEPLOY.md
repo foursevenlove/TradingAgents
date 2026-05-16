@@ -85,6 +85,8 @@ sudo systemctl status tradingagents
 MINIMAX_API_KEY=your_minimax_key
 # 或者使用阿里巴巴通义千问
 DASHSCOPE_API_KEY=your_dashscope_key
+# 或者使用阿里云 Coding Plan（不是百炼/DashScope Key）
+ALIYUN_CODING_PLAN_API_KEY=your_coding_plan_key
 
 # 必需 - Tushare Pro Token（A股数据）
 TUSHARE_TOKEN=your_tushare_token
@@ -158,6 +160,7 @@ docker image prune -f
 | `TRADINGAGENTS_PORT` | Web 服务端口 | 8000 |
 | `MINIMAX_API_KEY` | MiniMax API Key | - |
 | `DASHSCOPE_API_KEY` | 阿里巴巴通义千问 API Key | - |
+| `ALIYUN_CODING_PLAN_API_KEY` | 阿里云 Coding Plan API Key | - |
 | `TUSHARE_TOKEN` | Tushare Pro Token | - |
 
 ## 故障排查

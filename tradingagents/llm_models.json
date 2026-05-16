@@ -91,6 +91,24 @@
         {"name": "qwen2.5-7b-instruct", "description": "Qwen2.5 7B"}
       ]
     },
+    "aliyun_coding_plan": {
+      "description": "Alibaba Cloud Coding Plan (OpenAI-compatible)",
+      "api_key_env": "ALIYUN_CODING_PLAN_API_KEY",
+      "api_key_env_aliases": ["CODING_PLAN_API_KEY"],
+      "default_base_url": "https://coding.dashscope.aliyuncs.com/v1",
+      "aliases": ["alibaba_coding_plan", "coding_plan"],
+      "models": [
+        {"name": "kimi-k2.5", "description": "Kimi K2.5 (recommended, vision-capable)"},
+        {"name": "qwen3.6-plus", "description": "Qwen3.6 Plus (vision-capable)"},
+        {"name": "qwen3.5-plus", "description": "Qwen3.5 Plus (vision-capable)"},
+        {"name": "qwen3-max-2026-01-23", "description": "Qwen3 Max"},
+        {"name": "qwen3-coder-next", "description": "Qwen3 Coder Next"},
+        {"name": "qwen3-coder-plus", "description": "Qwen3 Coder Plus"},
+        {"name": "glm-5", "description": "GLM-5"},
+        {"name": "glm-4.7", "description": "GLM-4.7"},
+        {"name": "MiniMax-M2.5", "description": "MiniMax M2.5"}
+      ]
+    },
     "ollama": {
       "description": "Ollama local models",
       "api_key_env": null,

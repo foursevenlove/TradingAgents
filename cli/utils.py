@@ -163,6 +163,12 @@ def select_shallow_thinking_agent(provider) -> str:
             ("NVIDIA Nemotron 3 Nano 30B (free)", "nvidia/nemotron-3-nano-30b-a3b:free"),
             ("Z.AI GLM 4.5 Air (free)", "z-ai/glm-4.5-air:free"),
         ],
+        "aliyun_coding_plan": [
+            ("Kimi K2.5 - Coding Plan 推荐模型", "kimi-k2.5"),
+            ("Qwen3.6 Plus - 多模态", "qwen3.6-plus"),
+            ("Qwen3 Coder Plus - 代码任务", "qwen3-coder-plus"),
+            ("MiniMax-M2.5 - 快速、低成本", "MiniMax-M2.5"),
+        ],
         "ollama": [
             ("Qwen3:latest (8B, local)", "qwen3:latest"),
             ("GPT-OSS:latest (20B, local)", "gpt-oss:latest"),
@@ -234,6 +240,12 @@ def select_deep_thinking_agent(provider) -> str:
             ("Z.AI GLM 4.5 Air (free)", "z-ai/glm-4.5-air:free"),
             ("NVIDIA Nemotron 3 Nano 30B (free)", "nvidia/nemotron-3-nano-30b-a3b:free"),
         ],
+        "aliyun_coding_plan": [
+            ("Kimi K2.5 - Coding Plan 推荐模型", "kimi-k2.5"),
+            ("Qwen3.6 Plus - 多模态", "qwen3.6-plus"),
+            ("Qwen3 Max - 强推理", "qwen3-max-2026-01-23"),
+            ("Qwen3 Coder Next - 代码任务", "qwen3-coder-next"),
+        ],
         "ollama": [
             ("GLM-4.7-Flash:latest (30B, local)", "glm-4.7-flash:latest"),
             ("GPT-OSS:latest (20B, local)", "gpt-oss:latest"),
@@ -273,6 +285,7 @@ def select_llm_provider() -> tuple[str, str]:
         ("Anthropic", "https://api.anthropic.com/"),
         ("xAI", "https://api.x.ai/v1"),
         ("Openrouter", "https://openrouter.ai/api/v1"),
+        ("aliyun_coding_plan", "https://coding.dashscope.aliyuncs.com/v1"),
         ("Ollama", "http://localhost:11434/v1"),
     ]
 
