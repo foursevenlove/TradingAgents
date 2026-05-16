@@ -9,6 +9,7 @@ Architecture:
 
 import os
 import json
+import logging
 import sqlite3
 import threading
 import time
@@ -19,6 +20,7 @@ from pathlib import Path
 # Cache directory
 CACHE_DIR = Path(__file__).parent / "cache"
 CACHE_DB_PATH = CACHE_DIR / "news_cache.db"
+logger = logging.getLogger("tradingagents.web.recommendation.news_cache")
 
 # Retention period
 RETENTION_DAYS = 30
@@ -128,14 +130,14 @@ class NewsCacheManager:
             daemon=True,
         )
         self._update_thread.start()
-        print("[NewsCache] Background update thread started")
+        logger.info("News cache background update thread started")
 
     def stop_background_update(self):
         """Stop background update thread."""
         self._running = False
         if self._update_thread:
             self._update_thread.join(timeout=5)
-        print("[NewsCache] Background update thread stopped")
+        logger.info("News cache background update thread stopped")
 
     def _background_update_loop(self):
         """Background loop: fetch and process news periodically."""
@@ -164,7 +166,13 @@ class NewsCacheManager:
 
         try:
             # 1. Fetch latest news (look_back_days=1 for hourly update)
-            print(f"[NewsCache] Fetching news at {update_time}")
+            logger.info(
+                "News cache update started",
+                extra={"extra_data": {
+                    "stage": "news_cache_fetch",
+                    "update_time": update_time,
+                }},
+            )
             raw_news_csv = route_to_vendor(
                 "get_recommendation_news",
                 look_back_days=1,
@@ -173,14 +181,26 @@ class NewsCacheManager:
 
             # 2. Parse CSV to list
             news_list = self._parse_csv_to_list(raw_news_csv)
-            print(f"[NewsCache] Fetched {len(news_list)} news items")
+            logger.info(
+                "News cache fetched news items",
+                extra={"extra_data": {
+                    "stage": "news_cache_fetch",
+                    "news_count": len(news_list),
+                }},
+            )
 
             # 3. Store raw news (unprocessed)
             for news in news_list:
                 if self._store_raw_news(news):
                     news_added += 1
 
-            print(f"[NewsCache] Added {news_added} new news items")
+            logger.info(
+                "News cache stored raw news items",
+                extra={"extra_data": {
+                    "stage": "news_cache_store_raw",
+                    "news_added": news_added,
+                }},
+            )
 
             # 4. Process unprocessed news with LLM
             unprocessed = self._get_unprocessed_news(limit=100)
@@ -194,10 +214,23 @@ class NewsCacheManager:
                         self._update_processed_news(news["news_id"], processed)
                         news_processed += 1
                     except Exception as e:
-                        print(f"[NewsCache] Process error: {e}")
+                        logger.error(
+                            "News cache processing item failed",
+                            exc_info=(type(e), e, e.__traceback__),
+                            extra={"extra_data": {
+                                "stage": "news_cache_process_item",
+                                "news_id": news.get("news_id"),
+                            }},
+                        )
                         continue
 
-                print(f"[NewsCache] Processed {news_processed} news items")
+                logger.info(
+                    "News cache processed news items",
+                    extra={"extra_data": {
+                        "stage": "news_cache_process",
+                        "news_processed": news_processed,
+                    }},
+                )
 
             # 5. Cleanup old data
             self._cleanup_old_data()
@@ -205,7 +238,14 @@ class NewsCacheManager:
         except Exception as e:
             status = "error"
             error_message = str(e)
-            print(f"[NewsCache] Update error: {e}")
+            logger.error(
+                "News cache update failed",
+                exc_info=(type(e), e, e.__traceback__),
+                extra={"extra_data": {
+                    "stage": "news_cache_update",
+                    "update_time": update_time,
+                }},
+            )
 
         # 6. Log update
         self._log_update(update_time, news_added, news_processed, status, error_message)
@@ -450,7 +490,14 @@ class NewsCacheManager:
             conn.commit()
 
             if deleted_news > 0 or deleted_themes > 0:
-                print(f"[NewsCache] Cleanup: removed {deleted_news} news, {deleted_themes} themes")
+                logger.info(
+                    "News cache cleanup removed old rows",
+                    extra={"extra_data": {
+                        "stage": "news_cache_cleanup",
+                        "deleted_news": deleted_news,
+                        "deleted_themes": deleted_themes,
+                    }},
+                )
 
         finally:
             conn.close()

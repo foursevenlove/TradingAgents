@@ -29,6 +29,8 @@ from .akshare_news import (
     get_recommendation_news,
 )
 
+from .akshare_social import get_social_sentiment
+
 # Import A-share specific indicators
 from .akshare_indicators import (
     get_north_bound_flow,
@@ -69,6 +71,7 @@ __all__ = [
     "get_company_news",
     "get_industry_news",
     "get_policy_news",
+    "get_social_sentiment",
     # A-share specific indicators
     "get_north_bound_flow",
     "get_margin_trading",

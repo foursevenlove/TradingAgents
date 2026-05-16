@@ -1,5 +1,6 @@
 """API routes for TradingAgents Web UI."""
 import asyncio
+import json
 from typing import Optional
 
 from fastapi import APIRouter, HTTPException, Query
@@ -19,8 +20,10 @@ from .stream_adapter import start_analysis, get_runner
 from .holdings_router import get_holdings_manager
 from .holdings_manager import format_holdings_for_prompt
 from .config import WEB_CONFIG
+from .logging_config import log_analysis_event, log_exception, get_logger
 
 router = APIRouter()
+logger = get_logger("tradingagents.web.router")
 
 
 @router.post("/api/analyze/start")
@@ -49,6 +52,17 @@ async def analyze_start(req: AnalyzeRequest):
     holding = get_holdings_manager().get_holding_by_ticker(req.ticker)
     portfolio_holdings = format_holdings_for_prompt(holding)
 
+    log_analysis_event(
+        "api_start_analysis",
+        "Submitting analysis task",
+        task_id=task_id,
+        ticker=req.ticker,
+        trade_date=trade_date,
+        analysts=req.analysts,
+        config=config,
+        has_portfolio_holding=holding is not None,
+    )
+
     await start_analysis(
         task_id=task_id,
         ticker=req.ticker,
@@ -58,6 +72,13 @@ async def analyze_start(req: AnalyzeRequest):
         portfolio_holdings=portfolio_holdings,
     )
 
+    log_analysis_event(
+        "api_start_analysis",
+        "Analysis task submitted",
+        task_id=task_id,
+        ticker=req.ticker,
+        trade_date=trade_date,
+    )
     return {"task_id": task_id, "status": TaskStatus.RUNNING.value}
 
 
@@ -95,6 +116,12 @@ async def analyze_cancel(task_id: str):
     runner = get_runner(task_id)
     if runner:
         runner.cancel()
+        log_analysis_event(
+            "api_cancel_analysis",
+            "Analysis runner cancellation requested",
+            task_id=task_id,
+            ticker=task.get("ticker"),
+        )
 
     # Update task status
     get_task_manager().update_status(task_id, TaskStatus.CANCELLED)
@@ -137,22 +164,30 @@ async def analyze_events(task_id: str):
                             data=ev["data"],
                         )
                         yield event.to_sse()
-                    except Exception:
-                        pass
+                    except Exception as exc:
+                        log_exception(exc, context={
+                            "task_id": task_id,
+                            "stage": "sse_replay_event",
+                            "event": ev,
+                        })
 
             # Send terminal event based on actual task status
             task = get_task_manager().get_task(task_id)
             if task and task["status"] == TaskStatus.COMPLETED.value:
-                yield f"event: {EventType.COMPLETED.value}\ndata: {{\"task_id\": \"{task_id}\"}}\n\n"
+                payload = json.dumps({"task_id": task_id}, ensure_ascii=False)
+                yield f"event: {EventType.COMPLETED.value}\ndata: {payload}\n\n"
             elif task and task["status"] == TaskStatus.FAILED.value:
                 err = task.get("error") or "分析失败"
-                yield f"event: {EventType.FAILED.value}\ndata: {{\"error\": \"{err}\"}}\n\n"
+                payload = json.dumps({"error": err}, ensure_ascii=False)
+                yield f"event: {EventType.FAILED.value}\ndata: {payload}\n\n"
             elif task and task["status"] in (TaskStatus.RUNNING.value, TaskStatus.PENDING.value):
                 # Runner lost (server restart) — mark as failed
                 get_task_manager().update_status(task_id, TaskStatus.FAILED, error="服务重启，任务中断")
-                yield f"event: {EventType.FAILED.value}\ndata: {{\"error\": \"服务重启，任务中断\"}}\n\n"
+                payload = json.dumps({"error": "服务重启，任务中断"}, ensure_ascii=False)
+                yield f"event: {EventType.FAILED.value}\ndata: {payload}\n\n"
             else:
-                yield f"event: {EventType.COMPLETED.value}\ndata: {{\"task_id\": \"{task_id}\"}}\n\n"
+                payload = json.dumps({"task_id": task_id}, ensure_ascii=False)
+                yield f"event: {EventType.COMPLETED.value}\ndata: {payload}\n\n"
             return
 
         while True:
@@ -165,16 +200,17 @@ async def analyze_events(task_id: str):
                 yield ":\n\n"
                 task = get_task_manager().get_task(task_id)
                 if task and task["status"] == TaskStatus.COMPLETED.value:
-                    yield f"event: {EventType.COMPLETED.value}\ndata: {{\"task_id\": \"{task_id}\"}}\n\n"
+                    payload = json.dumps({"task_id": task_id}, ensure_ascii=False)
+                    yield f"event: {EventType.COMPLETED.value}\ndata: {payload}\n\n"
                     break
                 elif task and task["status"] == TaskStatus.FAILED.value:
                     err = task.get("error") or "分析失败"
-                    # Escape newlines for SSE JSON
-                    err_escaped = err.replace("\\", "\\\\").replace("\"", "\\\"").replace("\n", "\\n")
-                    yield f"event: {EventType.FAILED.value}\ndata: {{\"error\": \"{err_escaped}\"}}\n\n"
+                    payload = json.dumps({"error": err}, ensure_ascii=False)
+                    yield f"event: {EventType.FAILED.value}\ndata: {payload}\n\n"
                     break
                 elif task and task["status"] == TaskStatus.CANCELLED.value:
-                    yield f"event: {EventType.FAILED.value}\ndata: {{\"error\": \"分析已取消\"}}\n\n"
+                    payload = json.dumps({"error": "分析已取消"}, ensure_ascii=False)
+                    yield f"event: {EventType.FAILED.value}\ndata: {payload}\n\n"
                     break
 
     return StreamingResponse(
@@ -256,6 +292,15 @@ async def kline_data(ticker: str, days: int = Query(90, ge=10, le=365)):
             records = records[-days:]
             return records
         except Exception as e:
+            logger.warning(
+                "K-line data fetch failed",
+                exc_info=(type(e), e, e.__traceback__),
+                extra={"extra_data": {
+                    "ticker": ticker,
+                    "days": days,
+                    "stage": "kline_fetch",
+                }},
+            )
             return {"error": str(e)}
 
     loop = asyncio.get_event_loop()
@@ -348,6 +393,14 @@ async def health_check():
             results[name] = "timeout"
             overall = "degraded"
         except Exception as e:
+            logger.warning(
+                "Health check dependency failed",
+                exc_info=(type(e), e, e.__traceback__),
+                extra={"extra_data": {
+                    "check": name,
+                    "stage": "health_check",
+                }},
+            )
             results[name] = f"error: {type(e).__name__}: {str(e)}"
             overall = "degraded"
 
@@ -386,8 +439,8 @@ async def prometheus_metrics():
             rows = conn.execute("SELECT status, COUNT(*) as cnt FROM tasks GROUP BY status").fetchall()
             for row in rows:
                 lines.append(f"tradingagents_tasks_by_status{{status=\"{row['status']}\"}} {row['cnt']}")
-    except Exception:
-        pass
+    except Exception as exc:
+        log_exception(exc, context={"stage": "metrics_task_status_counts"})
 
     # Token usage stats
     token_stats = get_all_stats()
@@ -410,8 +463,8 @@ async def prometheus_metrics():
         cache = get_data_cache()
         cache_files = list(cache._cache_dir.glob("*.json"))
         lines.append(f"tradingagents_cache_entries {len(cache_files)}")
-    except Exception:
-        pass
+    except Exception as exc:
+        log_exception(exc, context={"stage": "metrics_cache_stats"})
 
     # Data source availability
     tushare_token = os.environ.get("TUSHARE_TOKEN", "")

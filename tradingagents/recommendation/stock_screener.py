@@ -3,6 +3,7 @@
 Uses akshare Sina data source for real-time screening.
 """
 
+import logging
 import pandas as pd
 from typing import List, Dict, Optional
 
@@ -12,6 +13,9 @@ from tradingagents.dataflows.akshare_screening import (
     get_a_share_spot_sina,
 )
 from tradingagents.market_data.industry_classification import get_sw_industry
+
+
+logger = logging.getLogger("tradingagents.web.recommendation.stock_screener")
 
 
 class StockScreener:
@@ -101,7 +105,16 @@ class StockScreener:
                 "industry": industry_info.get("level_1", "未知"),
                 "industry_detail": industry_info.get("level_2", "未知"),
             }
-        except Exception:
+        except Exception as exc:
+            logger.warning(
+                "Failed to get industry classification for screened stock",
+                exc_info=(type(exc), exc, exc.__traceback__),
+                extra={"extra_data": {
+                    "stage": "stock_screener_industry_lookup",
+                    "stock_code": stock_code,
+                    "ts_code": ts_code,
+                }},
+            )
             return {
                 "code": stock_code,
                 "ts_code": ts_code,

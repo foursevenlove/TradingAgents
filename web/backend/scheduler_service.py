@@ -13,7 +13,7 @@ from .holdings_manager import format_holdings_for_prompt
 from .task_manager import get_task_manager
 from .stream_adapter import start_analysis
 
-logger = logging.getLogger(__name__)
+logger = logging.getLogger("tradingagents.web.scheduler")
 
 
 class SchedulerService:
@@ -91,8 +91,15 @@ class SchedulerService:
                 # If last run was within 5 minutes of the scheduled time, skip
                 if abs((last_run - next_run_utc).total_seconds()) < 300:
                     return
-            except Exception:
-                pass
+            except Exception as exc:
+                logger.warning(
+                    "Failed to parse previous scheduled batch run time",
+                    exc_info=(type(exc), exc, exc.__traceback__),
+                    extra={"extra_data": {
+                        "stage": "scheduler_parse_last_run",
+                        "last_run_at": last_run_str,
+                    }},
+                )
 
         # Trigger batch analysis
         logger.info(f"Triggering scheduled batch analysis (cron: {cron_expr})")

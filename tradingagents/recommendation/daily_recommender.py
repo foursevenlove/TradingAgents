@@ -8,6 +8,7 @@ Integrates:
 """
 
 from datetime import datetime
+import logging
 from typing import List, Dict, Optional
 import pandas as pd
 
@@ -15,6 +16,9 @@ from tradingagents.recommendation.theme_extractor import ThemeExtractor
 from tradingagents.recommendation.stock_screener import StockScreener
 from tradingagents.recommendation.industry_mapper import IndustryMapper
 from tradingagents.default_config import DEFAULT_CONFIG
+
+
+logger = logging.getLogger("tradingagents.web.recommendation.daily")
 
 
 class DailyRecommender:
@@ -82,6 +86,15 @@ class DailyRecommender:
             }
 
         except Exception as e:
+            logger.error(
+                "Light TradingAgents analysis failed for recommendation stock",
+                exc_info=(type(e), e, e.__traceback__),
+                extra={"extra_data": {
+                    "stage": "daily_recommend_light_analysis",
+                    "ticker": stock_code,
+                    "trade_date": trade_date,
+                }},
+            )
             # Fallback: return basic info without analysis
             return {
                 "code": stock_code,
@@ -176,8 +189,16 @@ class DailyRecommender:
                                 stock["decision"] = analysis["decision"]
                                 stock["confidence"] = analysis["confidence"]
                                 stock["analysis_reason"] = analysis.get("reason", "")
-                except Exception:
-                    pass  # Skip failed analysis
+                except Exception as exc:
+                    logger.error(
+                        "Skipping recommendation light analysis after failure",
+                        exc_info=(type(exc), exc, exc.__traceback__),
+                        extra={"extra_data": {
+                            "stage": "daily_recommend_deep_analysis_loop",
+                            "ticker": ticker,
+                            "trade_date": trade_date,
+                        }},
+                    )
 
         # 5. Generate summary
         summary = self._generate_summary(themes, theme_stocks, trade_date, analysis_results if with_deep_analysis else None)

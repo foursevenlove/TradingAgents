@@ -10,6 +10,7 @@ Key improvements:
 """
 
 import json
+import logging
 import re
 import pandas as pd
 from datetime import datetime, timedelta
@@ -19,6 +20,9 @@ from tradingagents.llm_clients import create_llm_client
 from tradingagents.default_config import DEFAULT_CONFIG
 from tradingagents.recommendation.news_cache_manager import get_cache_manager
 from tradingagents.recommendation.theme_tracker import ThemeTracker
+
+
+logger = logging.getLogger("tradingagents.web.recommendation.theme_extractor")
 
 
 class ThemeExtractor:
@@ -86,10 +90,24 @@ class ThemeExtractor:
         news_list = self.get_cached_news_for_extraction(look_back_days, min_importance)
 
         if not news_list:
-            print("[ThemeExtractor] No cached news available, falling back to API")
+            logger.warning(
+                "No cached news available, falling back to recommendation news API",
+                extra={"extra_data": {
+                    "stage": "theme_extract_cache_empty",
+                    "look_back_days": look_back_days,
+                    "min_importance": min_importance,
+                }},
+            )
             return self.extract_themes_from_api(look_back_days, max_themes)
 
-        print(f"[ThemeExtractor] Using {len(news_list)} cached news items")
+        logger.info(
+            "Using cached news for theme extraction",
+            extra={"extra_data": {
+                "stage": "theme_extract_cache",
+                "news_count": len(news_list),
+                "look_back_days": look_back_days,
+            }},
+        )
 
         # 2. Aggregate structured data for LLM
         aggregated = self._aggregate_structured_data(news_list)
@@ -187,7 +205,11 @@ class ThemeExtractor:
             return themes[:max_themes]
 
         except Exception as e:
-            print(f"[ThemeExtractor] LLM error: {e}, using keyword fallback")
+            logger.error(
+                "Structured theme extraction LLM failed, using keyword fallback",
+                exc_info=(type(e), e, e.__traceback__),
+                extra={"extra_data": {"stage": "theme_extract_structured_llm"}},
+            )
             return self._fallback_from_structured(aggregated, max_themes)
 
     def _build_structured_prompt(self, aggregated: Dict) -> str:
@@ -335,7 +357,15 @@ class ThemeExtractor:
             return self._parse_csv_to_list(result)
 
         except Exception as e:
-            print(f"[ThemeExtractor] API error: {e}")
+            logger.error(
+                "Recommendation news API failed during theme extraction",
+                exc_info=(type(e), e, e.__traceback__),
+                extra={"extra_data": {
+                    "stage": "theme_extract_api",
+                    "look_back_days": look_back_days,
+                    "max_articles": max_articles,
+                }},
+            )
             return []
 
     def _parse_csv_to_list(self, csv_string: str) -> List[Dict]:
@@ -447,7 +477,14 @@ class ThemeExtractor:
             return themes[:max_themes]
 
         except Exception as e:
-            print(f"[ThemeExtractor] LLM error: {e}, using fallback")
+            logger.error(
+                "Raw-news theme extraction LLM failed, using fallback",
+                exc_info=(type(e), e, e.__traceback__),
+                extra={"extra_data": {
+                    "stage": "theme_extract_raw_llm",
+                    "news_count": len(news_list),
+                }},
+            )
             return self._fallback_extract_themes(news_list, max_themes)
 
     def _fallback_extract_themes(self, news_list: List[Dict], max_themes: int) -> List[Dict]:

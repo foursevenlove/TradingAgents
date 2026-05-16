@@ -20,7 +20,7 @@ from .models import SSEEvent, EventType, TaskStatus
 from .task_manager import get_task_manager
 from .config import WEB_CONFIG
 from .exceptions import LLMError, LLMTimeoutError, DataSourceError, classify_exception
-from .logging_config import get_server_logger, log_exception
+from .logging_config import get_server_logger, log_exception, log_analysis_event
 
 
 def _strip_think_blocks(text: str) -> str:
@@ -29,14 +29,15 @@ def _strip_think_blocks(text: str) -> str:
 
 
 # ── Agent 分析日志 ────────────────────────────────────────────────────────────
-# 每次分析写一个独立文件：logs/agent_<task_id[:8]>_<ticker>_<date>.log
+# 每次分析写一个独立文件：logs/YYYYMMDD_HHMMSS_<task_id[:8]>_<ticker>.log
 # 格式：人类可读的结构化文本，方便后续审查工作流和数据质量
 
 def _get_agent_logger(task_id: str, ticker: str, trade_date: str) -> logging.Logger:
     log_dir = Path(WEB_CONFIG["log_dir"])
     log_dir.mkdir(parents=True, exist_ok=True)
     short_id = task_id[:8]
-    log_file = log_dir / f"agent_{short_id}_{ticker}_{trade_date}.log"
+    created_at = datetime.now().strftime("%Y%m%d_%H%M%S")
+    log_file = log_dir / f"{created_at}_{short_id}_{ticker}.log"
 
     logger = logging.getLogger(f"agent.{task_id}")
     if logger.handlers:
@@ -172,9 +173,18 @@ def _on_task_done(task: asyncio.Task, task_id: str, ticker: str):
         exc = task.exception()
         if exc is not None:
             _logger = get_server_logger()
-            _logger.error(f"Task {task_id} for {ticker} failed with unhandled exception: {type(exc).__name__}: {exc}")
+            _logger.error(
+                f"Task {task_id} for {ticker} failed with unhandled exception: {type(exc).__name__}: {exc}",
+                exc_info=(type(exc), exc, exc.__traceback__),
+                extra={"extra_data": {"task_id": task_id, "ticker": ticker}},
+            )
     except asyncio.CancelledError:
-        pass  # Task was cancelled, expected
+        log_analysis_event(
+            "task_done",
+            "Analysis task was cancelled",
+            task_id=task_id,
+            ticker=ticker,
+        )
     finally:
         _active_tasks.pop(task_id, None)
 
@@ -207,6 +217,14 @@ class AnalysisRunner:
         self._risk_judge_sent = False
         self._final_decision_sent = False
         self._agent_logger = _get_agent_logger(task_id, ticker, trade_date)
+        log_analysis_event(
+            "runner_init",
+            "Analysis runner initialized",
+            task_id=self.task_id,
+            ticker=self.ticker,
+            trade_date=self.trade_date,
+            analysts=self.analysts,
+        )
 
     def _build_config(self, override: Optional[Dict]) -> Dict[str, Any]:
         config = copy.deepcopy(DEFAULT_CONFIG)
@@ -235,12 +253,31 @@ class AnalysisRunner:
 
         for attempt in range(MAX_RETRIES):
             try:
-                _logger.info(f"Starting analysis attempt {attempt + 1}/{MAX_RETRIES} for {self.ticker}")
+                log_analysis_event(
+                    "attempt_start",
+                    "Analysis attempt started",
+                    task_id=self.task_id,
+                    ticker=self.ticker,
+                    trade_date=self.trade_date,
+                    attempt=attempt + 1,
+                    max_retries=MAX_RETRIES,
+                    analysts=self.analysts,
+                )
 
                 graph = TradingAgentsGraph(
                     selected_analysts=self.analysts,
                     config=self.config,
                     callbacks=[token_tracker],
+                )
+                log_analysis_event(
+                    "graph_created",
+                    "TradingAgents graph created",
+                    task_id=self.task_id,
+                    ticker=self.ticker,
+                    attempt=attempt + 1,
+                    llm_provider=self.config.get("llm_provider"),
+                    deep_think_llm=self.config.get("deep_think_llm"),
+                    quick_think_llm=self.config.get("quick_think_llm"),
                 )
                 init_state = graph.propagator.create_initial_state(
                     self.ticker, self.trade_date, self.portfolio_holdings
@@ -249,6 +286,13 @@ class AnalysisRunner:
 
                 await self._emit(EventType.STARTED, {"ticker": self.ticker, "trade_date": self.trade_date})
                 get_task_manager().update_status(self.task_id, TaskStatus.RUNNING)
+                log_analysis_event(
+                    "task_status",
+                    "Analysis task marked running",
+                    task_id=self.task_id,
+                    ticker=self.ticker,
+                    status=TaskStatus.RUNNING.value,
+                )
 
                 # Bridge: background thread -> asyncio.Queue
                 loop = asyncio.get_event_loop()
@@ -263,7 +307,16 @@ class AnalysisRunner:
                             loop.call_soon_threadsafe(async_queue.put_nowait, ("chunk", chunk))
                         loop.call_soon_threadsafe(async_queue.put_nowait, ("done", None))
                     except Exception as e:
-                        _logger.error(f"Graph execution error: {type(e).__name__}: {str(e)}")
+                        _logger.error(
+                            f"Graph execution error: {type(e).__name__}: {str(e)}",
+                            exc_info=(type(e), e, e.__traceback__),
+                            extra={"extra_data": {
+                                "task_id": self.task_id,
+                                "ticker": self.ticker,
+                                "stage": "graph_stream",
+                                "attempt": attempt + 1,
+                            }},
+                        )
                         classified = classify_exception(e)
                         loop.call_soon_threadsafe(async_queue.put_nowait, ("error", {
                             "type": classified.error_code,
@@ -279,7 +332,15 @@ class AnalysisRunner:
                     try:
                         item_type, item_data = await asyncio.wait_for(async_queue.get(), timeout=SILENCE_TIMEOUT)
                     except asyncio.TimeoutError:
-                        _logger.warning(f"Task timeout after {SILENCE_TIMEOUT}s, attempt {attempt + 1}")
+                        log_analysis_event(
+                            "silence_timeout",
+                            "Analysis task timed out waiting for graph events",
+                            logging.WARNING,
+                            task_id=self.task_id,
+                            ticker=self.ticker,
+                            attempt=attempt + 1,
+                            silence_timeout_sec=SILENCE_TIMEOUT,
+                        )
                         if attempt < MAX_RETRIES - 1:
                             await self._emit(EventType.FAILED, {
                                 "error": f"任务超时，正在重试 ({attempt + 2}/{MAX_RETRIES})...",
@@ -293,15 +354,37 @@ class AnalysisRunner:
                     if item_type == "chunk":
                         await self._process_chunk(item_data)
                     elif item_type == "done":
+                        log_analysis_event(
+                            "graph_done",
+                            "Graph stream completed",
+                            task_id=self.task_id,
+                            ticker=self.ticker,
+                            attempt=attempt + 1,
+                        )
                         break
                     elif item_type == "cancelled":
                         get_task_manager().update_status(self.task_id, TaskStatus.CANCELLED)
                         await self._emit(EventType.FAILED, {"error": "分析已取消"})
+                        log_analysis_event(
+                            "task_cancelled",
+                            "Analysis task cancelled by user",
+                            task_id=self.task_id,
+                            ticker=self.ticker,
+                        )
                         _cleanup_task(self.task_id)
                         return
                     elif item_type == "error":
                         error_info = item_data
-                        _logger.error(f"Analysis error: {error_info['type']} - {error_info['detail']}")
+                        log_analysis_event(
+                            "graph_error",
+                            "Graph stream returned error",
+                            logging.ERROR,
+                            task_id=self.task_id,
+                            ticker=self.ticker,
+                            attempt=attempt + 1,
+                            error_code=error_info["type"],
+                            detail=error_info["detail"],
+                        )
 
                         if error_info["type"] in ["LLM_ERROR", "LLM_TIMEOUT"] and attempt < MAX_RETRIES - 1:
                             await self._emit(EventType.FAILED, {
@@ -324,7 +407,15 @@ class AnalysisRunner:
                         signal = graph.process_signal(clean_decision)
                         signal = _strip_think_blocks(signal).strip().upper()
                     except Exception as e:
-                        _logger.warning(f"Signal processing error: {e}")
+                        _logger.warning(
+                            f"Signal processing error: {e}",
+                            exc_info=(type(e), e, e.__traceback__),
+                            extra={"extra_data": {
+                                "task_id": self.task_id,
+                                "ticker": self.ticker,
+                                "stage": "signal_processing",
+                            }},
+                        )
                         signal = "UNKNOWN"
 
                     if not self._final_decision_sent and final_state.get("final_trade_decision"):
@@ -342,13 +433,28 @@ class AnalysisRunner:
                     result["token_stats"] = token_stats
                     get_task_manager().set_result(self.task_id, result, signal)
 
-                    _logger.info(f"Analysis completed successfully for {self.ticker} | tokens: {token_stats.get('total_tokens', 0)}")
+                    log_analysis_event(
+                        "task_completed",
+                        "Analysis completed successfully",
+                        task_id=self.task_id,
+                        ticker=self.ticker,
+                        signal=signal,
+                        total_tokens=token_stats.get("total_tokens", 0),
+                    )
                     remove_token_tracker(self.task_id)
                     _cleanup_task(self.task_id)
                     return  # Success
 
             except LLMTimeoutError as e:
-                _logger.error(f"LLM timeout on attempt {attempt + 1}: {e}")
+                log_analysis_event(
+                    "attempt_failed",
+                    "LLM timeout during analysis",
+                    logging.ERROR,
+                    task_id=self.task_id,
+                    ticker=self.ticker,
+                    attempt=attempt + 1,
+                    error=str(e),
+                )
                 if attempt < MAX_RETRIES - 1:
                     await self._emit(EventType.FAILED, {
                         "error": f"AI 模型响应超时，正在重试 ({attempt + 2}/{MAX_RETRIES})...",
@@ -363,7 +469,15 @@ class AnalysisRunner:
                     log_exception(e, context={"task_id": self.task_id, "ticker": self.ticker, "attempts": attempt + 1})
 
             except LLMError as e:
-                _logger.error(f"LLM error on attempt {attempt + 1}: {e}")
+                log_analysis_event(
+                    "attempt_failed",
+                    "LLM error during analysis",
+                    logging.ERROR,
+                    task_id=self.task_id,
+                    ticker=self.ticker,
+                    attempt=attempt + 1,
+                    error=str(e),
+                )
                 if attempt < MAX_RETRIES - 1:
                     await self._emit(EventType.FAILED, {
                         "error": f"{e.user_message}，正在重试 ({attempt + 2}/{MAX_RETRIES})...",
@@ -378,7 +492,14 @@ class AnalysisRunner:
                     log_exception(e, context={"task_id": self.task_id, "ticker": self.ticker, "attempts": attempt + 1})
 
             except DataSourceError as e:
-                _logger.error(f"Data source error: {e}")
+                log_analysis_event(
+                    "attempt_failed",
+                    "Data source error during analysis",
+                    logging.ERROR,
+                    task_id=self.task_id,
+                    ticker=self.ticker,
+                    error=str(e),
+                )
                 error_msg = e.user_message
                 await self._emit(EventType.FAILED, {"error": error_msg})
                 get_task_manager().update_status(self.task_id, TaskStatus.FAILED, error=error_msg)
@@ -386,7 +507,16 @@ class AnalysisRunner:
                 break
 
             except Exception as e:
-                _logger.error(f"Unexpected error on attempt {attempt + 1}: {type(e).__name__}: {str(e)}")
+                _logger.error(
+                    f"Unexpected error on attempt {attempt + 1}: {type(e).__name__}: {str(e)}",
+                    exc_info=(type(e), e, e.__traceback__),
+                    extra={"extra_data": {
+                        "task_id": self.task_id,
+                        "ticker": self.ticker,
+                        "stage": "attempt_failed",
+                        "attempt": attempt + 1,
+                    }},
+                )
                 classified = classify_exception(e)
 
                 if classified.error_code in ["LLM_ERROR", "LLM_TIMEOUT"] and attempt < MAX_RETRIES - 1:
@@ -409,6 +539,12 @@ class AnalysisRunner:
                     break
 
         # Final cleanup for any failure path that didn't return
+        log_analysis_event(
+            "task_cleanup",
+            "Analysis task cleanup after failure",
+            task_id=self.task_id,
+            ticker=self.ticker,
+        )
         remove_token_tracker(self.task_id)
         _cleanup_task(self.task_id)
 
@@ -636,11 +772,25 @@ class AnalysisRunner:
     async def _emit(self, event_type: EventType, data: Dict[str, Any]):
         event = SSEEvent(type=event_type, task_id=self.task_id, data=data)
         await self.queue.put(event)
-        get_task_manager().save_event(self.task_id, event_type.value, data)
+        try:
+            get_task_manager().save_event(self.task_id, event_type.value, data)
+        except Exception as exc:
+            log_exception(exc, context={
+                "task_id": self.task_id,
+                "ticker": self.ticker,
+                "stage": "save_event",
+                "event_type": event_type.value,
+                "event_data": data,
+            })
         try:
             self._agent_logger.info(_format_agent_log(event_type, data))
-        except Exception:
-            pass
+        except Exception as exc:
+            log_exception(exc, context={
+                "task_id": self.task_id,
+                "ticker": self.ticker,
+                "stage": "write_agent_log",
+                "event_type": event_type.value,
+            })
 
     def _build_result(self, state: Dict[str, Any]) -> Dict[str, Any]:
         return {

@@ -792,18 +792,19 @@ def _llm_filter_policy_news(
     cctv_df: pd.DataFrame,
     ticker: str,
     industry_info: Dict[str, Any],
+    max_items: int = 10,
 ) -> pd.DataFrame:
     """Use LLM to filter CCTV news for policy items relevant to the stock's industry.
 
-    Returns a filtered DataFrame containing only relevant policy items.
-    If LLM fails, returns the original DataFrame.
+    Returns up to max_items relevant policy items.
+    If LLM is unavailable or fails, returns the most recent max_items CCTV items.
     """
     if cctv_df.empty:
         return cctv_df
 
     llm = _get_filter_llm()
     if llm is None:
-        return cctv_df
+        return cctv_df.head(max_items).copy()
 
     company_name = industry_info.get('company_name', ticker)
     level_1 = industry_info.get('level_1', '')
@@ -830,7 +831,8 @@ def _llm_filter_policy_news(
 4. 纯外交、民生、体育、文化等与该行业无关 → 排除
 5. 地方性政策（非全国性）且与行业无关 → 排除
 
-只返回编号列表，格式如：1,3,7,12,15
+最多选择 {max_items} 条，优先选择政策相关性强、行业传导路径清晰、发布时间更近的条目。
+只返回编号列表，格式如：1,3,7
 不要添加任何解释或额外文字。
 
 新闻联播条目：
@@ -850,10 +852,10 @@ def _llm_filter_policy_news(
                 selected.append(index_map[n])
 
         if selected:
-            return cctv_df.loc[cctv_df.index.isin(selected)]
+            return cctv_df.loc[cctv_df.index.isin(selected)].head(max_items).copy()
         return cctv_df.iloc[0:0].copy()
     except Exception:
-        return cctv_df
+        return cctv_df.head(max_items).copy()
 
 def get_insider_transactions(
     ticker: Annotated[str, "A-share ticker symbol"],
@@ -896,7 +898,7 @@ def get_company_news(
     """第一层：获取公司直接相关新闻。
 
     调用 tushare news API（6源分段拉取）+ major_news 长篇通讯，
-    通过公司名+股票代码关键词筛选，最多返回 20 条。
+    通过公司名+股票代码关键词筛选，最多返回 15 条。
     """
     try:
         pro = _get_pro_api()
@@ -945,7 +947,7 @@ def get_company_news(
             elif 'pub_time' in filtered_df.columns:
                 filtered_df = filtered_df.sort_values('pub_time', ascending=False)
 
-            TARGET_COUNT = 20
+            TARGET_COUNT = 15
 
             if len(filtered_df) >= TARGET_COUNT:
                 final_df = filtered_df.head(TARGET_COUNT)
@@ -966,7 +968,7 @@ def get_company_news(
             header += f"# Total raw: {len(merged_df)} | Keyword hits: {len(keyword_results)}\n"
             header += f"# Final: {len(final_df)}\n"
 
-            if len(final_df) >= 10:
+            if not final_df.empty:
                 return _format_to_csv(final_df, header)
             return _format_to_csv(final_df, header) + "\n# _FALLBACK_TO_AKSHARE_"
 
@@ -1241,12 +1243,13 @@ def get_policy_news(
                 'level_1': level_1,
                 'level_2': level_2,
             },
+            max_items=10,
         )
 
         header = f"# 第三层 · 政策新闻 ({ticker})\n"
         header += f"# Company: {company_name or 'N/A'} | Industry: {industry_context or 'N/A'}\n"
         header += f"# Date range: {(end_day - timedelta(days=look_back_days-1)).strftime('%Y-%m-%d')} to {end_day.strftime('%Y-%m-%d')}\n"
-        header += f"# Total CCTV items: {len(merged_df)} | Relevant: {len(filtered_df)}\n"
+        header += f"# Total CCTV items: {len(merged_df)} | Relevant: {len(filtered_df)} | Max: 10\n"
 
         return _format_to_csv(filtered_df, header)
 

@@ -8,6 +8,7 @@ Integrates:
 """
 
 from datetime import datetime, timedelta
+import logging
 from typing import List, Dict, Optional
 import pandas as pd
 
@@ -15,6 +16,9 @@ from tradingagents.recommendation.theme_extractor import ThemeExtractor
 from tradingagents.recommendation.stock_screener import StockScreener
 from tradingagents.recommendation.industry_mapper import IndustryMapper
 from tradingagents.default_config import DEFAULT_CONFIG
+
+
+logger = logging.getLogger("tradingagents.web.recommendation.weekly")
 
 
 class WeeklyRecommender:
@@ -78,6 +82,15 @@ class WeeklyRecommender:
             }
 
         except Exception as e:
+            logger.error(
+                "Weekly full TradingAgents analysis failed",
+                exc_info=(type(e), e, e.__traceback__),
+                extra={"extra_data": {
+                    "stage": "weekly_recommend_full_analysis",
+                    "ticker": stock_code,
+                    "trade_date": trade_date,
+                }},
+            )
             return {
                 "code": stock_code,
                 "decision": "hold",
@@ -108,7 +121,17 @@ class WeeklyRecommender:
                 max_articles=max_articles,
             )
             return news
-        except Exception:
+        except Exception as exc:
+            logger.error(
+                "Weekly recommendation news fetch failed",
+                exc_info=(type(exc), exc, exc.__traceback__),
+                extra={"extra_data": {
+                    "stage": "weekly_recommend_news_fetch",
+                    "week_start": week_start,
+                    "days": days,
+                    "max_articles": max_articles,
+                }},
+            )
             return []
 
     def extract_weekly_themes(
@@ -229,8 +252,16 @@ class WeeklyRecommender:
                             stock["decision"] = analysis["decision"]
                             stock["confidence"] = analysis["confidence"]
                             stock["analysis_reason"] = analysis.get("reason", "")
-            except Exception:
-                pass
+            except Exception as exc:
+                logger.error(
+                    "Skipping weekly full analysis after failure",
+                    exc_info=(type(exc), exc, exc.__traceback__),
+                    extra={"extra_data": {
+                        "stage": "weekly_recommend_analysis_loop",
+                        "ticker": ticker,
+                        "week_end": week_end,
+                    }},
+                )
 
         # 5. Generate summary
         summary = self._generate_summary(

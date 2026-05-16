@@ -1,7 +1,7 @@
 #!/bin/bash
 # 后台启动 TradingAgents Web UI
 #   logs/web.log              — uvicorn HTTP 访问日志
-#   logs/agent_<id>_*.log     — 每次分析独立的 Agent 日志
+#   web/logs/YYYYMMDD_HHMMSS_<id>_<ticker>.log — 每次分析独立的 Agent 日志（可通过 TRADINGAGENTS_WEB_LOG_DIR 覆盖）
 
 set -e
 
@@ -16,6 +16,7 @@ fi
 
 LOG_DIR="$PROJECT_ROOT/logs"
 mkdir -p "$LOG_DIR"
+AGENT_LOG_DIR="${TRADINGAGENTS_WEB_LOG_DIR:-$PROJECT_ROOT/web/logs}"
 
 WEB_LOG="$LOG_DIR/web.log"
 PID_FILE="$LOG_DIR/web.pid"
@@ -43,10 +44,10 @@ cd web/frontend && npm run build 2>&1 | grep -E "(built|error|warn)" && cd "$PRO
 # ── 启动后端（后台） ──────────────────────────────────────────
 echo "后台启动 FastAPI 服务..."
 echo "  服务日志  → $WEB_LOG"
-echo "  Agent日志 → $LOG_DIR/agent_<id>_<ticker>_<date>.log  (每次分析独立文件)"
+echo "  Agent日志 → $AGENT_LOG_DIR/YYYYMMDD_HHMMSS_<id>_<ticker>.log  (每次分析独立文件)"
 
 # 直接用 nohup 启动 uvicorn，stderr/stdout 都写到 web.log
-# Agent 分析日志由 stream_adapter.py 直接写入 logs/agent_*.log
+# Agent 分析日志由 stream_adapter.py 直接写入 YYYYMMDD_HHMMSS_<id>_<ticker>.log
 # 直接用 conda 环境里的 uvicorn，避免用到系统 Python
 UVICORN="/usr/local/anaconda3/envs/tradingagents/bin/uvicorn"
 if [ ! -f "$UVICORN" ]; then
@@ -74,7 +75,7 @@ for i in $(seq 1 20); do
         echo ""
         echo "实时查看日志:"
         echo "  tail -f $WEB_LOG"
-        echo "  tail -f $LOG_DIR/agent_*.log   # 分析过程日志（每次分析独立文件）"
+        echo "  tail -f $AGENT_LOG_DIR/*.log   # 分析过程日志（每次分析独立文件）"
         echo ""
         echo "停止服务:"
         echo "  ./scripts/stop_web.sh"

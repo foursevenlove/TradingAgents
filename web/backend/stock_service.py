@@ -1,5 +1,6 @@
 """Stock search service with cached stock list."""
 import json
+import logging
 import os
 from pathlib import Path
 from datetime import datetime
@@ -17,6 +18,7 @@ _cache_loaded = False
 _cache_loading = False
 _cache_lock = threading.Lock()
 _cache_time: Optional[datetime] = None
+logger = logging.getLogger("tradingagents.web.stock_service")
 
 
 def _convert_akshare_code_to_tushare(code: str) -> str:
@@ -59,13 +61,28 @@ def _load_stock_cache():
         _save_stock_list_to_db(stocks)
         return True
     except Exception as e:
-        print(f"Failed to load stock cache from akshare: {e}")
+        logger.warning(
+            "Failed to load stock cache from akshare, trying database fallback",
+            exc_info=(type(e), e, e.__traceback__),
+            extra={"extra_data": {"stage": "stock_cache_load_akshare"}},
+        )
         # Try to load from database
         _stock_cache = _load_stock_list_from_db()
         if _stock_cache:
             _cache_loaded = True
             _cache_time = datetime.utcnow()
+            logger.info(
+                "Loaded stock cache from database fallback",
+                extra={"extra_data": {
+                    "stage": "stock_cache_load_db",
+                    "stock_count": len(_stock_cache),
+                }},
+            )
             return True
+        logger.error(
+            "Stock cache load failed and database fallback is empty",
+            extra={"extra_data": {"stage": "stock_cache_load_failed"}},
+        )
         return False
 
 

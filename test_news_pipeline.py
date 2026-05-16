@@ -374,6 +374,53 @@ def run_dataflow_unit_tests(recorder: CheckRecorder) -> None:
             {"company_name": "浦发银行", "level_1": "银行", "level_2": "股份制银行"},
         )
         recorder.require(filtered.empty, "empty policy LLM selection returns empty frame")
+
+        class ManyPolicyLLM:
+            def invoke(self, _prompt):
+                return SimpleNamespace(content="1,2,3,4,5,6,7,8,9,10,11,12")
+
+        tushare_news._get_filter_llm = lambda: ManyPolicyLLM()
+        many_cctv = pd.DataFrame(
+            [{"title": f"政策新闻{i}", "content": "行业政策内容"} for i in range(12)]
+        )
+        capped = tushare_news._llm_filter_policy_news(
+            many_cctv,
+            "600000.SH",
+            {"company_name": "浦发银行", "level_1": "银行", "level_2": "股份制银行"},
+            max_items=10,
+        )
+        recorder.require(len(capped) == 10, "policy LLM selection is capped at 10", str(len(capped)))
+
+        original_get_pro_api = tushare_news._get_pro_api
+        original_get_stock_name = tushare_news._get_stock_name_from_code
+        original_segmented_fetch_major = tushare_news._segmented_fetch_major
+        original_fetch_news_source = tushare_news._fetch_news_source
+        original_filter_company = tushare_news._filter_company_entity_news
+        original_company_sources = tushare_news.COMPANY_NEWS_SOURCES
+        try:
+            small_company_df = pd.DataFrame(
+                [
+                    {"title": "浦发银行新闻一", "content": "浦发银行直接相关新闻", "datetime": "2026-05-15 10:00:00"},
+                    {"title": "浦发银行新闻二", "content": "浦发银行直接相关新闻", "datetime": "2026-05-15 09:00:00"},
+                ]
+            )
+            tushare_news._get_pro_api = lambda: object()
+            tushare_news._get_stock_name_from_code = lambda _ticker: "浦发银行"
+            tushare_news._segmented_fetch_major = lambda *_args, **_kwargs: pd.DataFrame()
+            tushare_news._fetch_news_source = lambda *_args, **_kwargs: small_company_df
+            tushare_news._filter_company_entity_news = lambda _df, _keywords: small_company_df
+            tushare_news.COMPANY_NEWS_SOURCES = ["eastmoney"]
+
+            small_result = tushare_news.get_company_news("600000.SH", "2026-05-12", "2026-05-15")
+            recorder.require("# Final: 2" in small_result, "small company result keeps exact count", small_result[:300])
+            recorder.require("_FALLBACK_TO_AKSHARE_" not in small_result, "small non-empty company result does not force fallback")
+        finally:
+            tushare_news._get_pro_api = original_get_pro_api
+            tushare_news._get_stock_name_from_code = original_get_stock_name
+            tushare_news._segmented_fetch_major = original_segmented_fetch_major
+            tushare_news._fetch_news_source = original_fetch_news_source
+            tushare_news._filter_company_entity_news = original_filter_company
+            tushare_news.COMPANY_NEWS_SOURCES = original_company_sources
     finally:
         tushare_news._get_filter_llm = original_get_filter_llm
 

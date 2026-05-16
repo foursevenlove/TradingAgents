@@ -10,6 +10,10 @@ from threading import Lock
 from .models import TaskStatus, TaskSummary, TaskDetail
 from .config import WEB_CONFIG
 from .stock_service import get_stock_name
+from .logging_config import get_logger
+
+
+_logger = get_logger("tradingagents.web.task_manager")
 
 
 class TaskManager:
@@ -109,6 +113,16 @@ class TaskManager:
                 ),
             )
             conn.commit()
+        _logger.info(
+            "Analysis task created",
+            extra={"extra_data": {
+                "task_id": task_id,
+                "ticker": ticker,
+                "trade_date": trade_date,
+                "stock_name": stock_name,
+                "config": config,
+            }},
+        )
         return task_id
 
     def get_lock(self, task_id: str) -> Lock:
@@ -116,6 +130,14 @@ class TaskManager:
 
     def update_status(self, task_id: str, status: TaskStatus, error: Optional[str] = None):
         if task_id not in self._tasks:
+            _logger.warning(
+                "Ignoring status update for unknown in-memory task",
+                extra={"extra_data": {
+                    "task_id": task_id,
+                    "status": status.value,
+                    "error": error,
+                }},
+            )
             return
         self._tasks[task_id]["status"] = status.value
         if error:
@@ -134,6 +156,17 @@ class TaskManager:
                 ),
             )
             conn.commit()
+        log_level = "error" if status == TaskStatus.FAILED else "info"
+        getattr(_logger, log_level)(
+            "Analysis task status updated",
+            extra={"extra_data": {
+                "task_id": task_id,
+                "ticker": self._tasks[task_id].get("ticker"),
+                "status": status.value,
+                "error": error,
+                "completed_at": self._tasks[task_id].get("completed_at"),
+            }},
+        )
 
     def set_result(self, task_id: str, result: dict, signal: str):
         if task_id not in self._tasks:
@@ -151,6 +184,15 @@ class TaskManager:
                 ),
             )
             conn.commit()
+        _logger.info(
+            "Analysis task result saved",
+            extra={"extra_data": {
+                "task_id": task_id,
+                "ticker": self._tasks[task_id].get("ticker"),
+                "signal": signal,
+                "result_keys": list(result.keys()),
+            }},
+        )
 
     def save_event(self, task_id: str, event_type: str, data: dict):
         now = datetime.utcnow().isoformat() + "Z"
@@ -178,8 +220,15 @@ class TaskManager:
                     if task.get(key) and isinstance(task[key], str):
                         try:
                             task[key] = json.loads(task[key])
-                        except Exception:
-                            pass
+                        except Exception as exc:
+                            _logger.warning(
+                                "Failed to parse task JSON field",
+                                exc_info=(type(exc), exc, exc.__traceback__),
+                                extra={"extra_data": {
+                                    "task_id": task_id,
+                                    "field": key,
+                                }},
+                            )
                 return task
         return None
 
@@ -267,8 +316,15 @@ class TaskManager:
             if task.get(key) and isinstance(task[key], str):
                 try:
                     task[key] = json.loads(task[key])
-                except Exception:
-                    pass
+                except Exception as exc:
+                    _logger.warning(
+                        "Failed to parse cached task JSON field",
+                        exc_info=(type(exc), exc, exc.__traceback__),
+                        extra={"extra_data": {
+                            "task_id": task_id,
+                            "field": key,
+                        }},
+                    )
         return task
 
 

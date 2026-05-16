@@ -1,10 +1,14 @@
 """Recommendation History Manager - Persist recommendation results."""
 
 import json
+import logging
 import sqlite3
 from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Dict, Optional, List
+
+
+logger = logging.getLogger("tradingagents.web.recommend_history")
 
 
 class RecommendHistoryManager:
@@ -64,7 +68,15 @@ class RecommendHistoryManager:
             conn.commit()
             return True
         except Exception as e:
-            print(f"Error saving recommendation: {e}")
+            logger.error(
+                "Error saving recommendation",
+                exc_info=(type(e), e, e.__traceback__),
+                extra={"extra_data": {
+                    "mode": mode,
+                    "trade_date": trade_date,
+                    "stage": "recommend_history_save",
+                }},
+            )
             return False
         finally:
             conn.close()
@@ -98,7 +110,14 @@ class RecommendHistoryManager:
                 }
             return None
         except Exception as e:
-            print(f"Error getting recommendation: {e}")
+            logger.error(
+                "Error getting latest recommendation",
+                exc_info=(type(e), e, e.__traceback__),
+                extra={"extra_data": {
+                    "mode": mode,
+                    "stage": "recommend_history_get_latest",
+                }},
+            )
             return None
         finally:
             conn.close()
@@ -131,7 +150,15 @@ class RecommendHistoryManager:
                 }
             return None
         except Exception as e:
-            print(f"Error getting recommendation: {e}")
+            logger.error(
+                "Error getting recommendation by date",
+                exc_info=(type(e), e, e.__traceback__),
+                extra={"extra_data": {
+                    "mode": mode,
+                    "trade_date": trade_date,
+                    "stage": "recommend_history_get_by_date",
+                }},
+            )
             return None
         finally:
             conn.close()
@@ -173,7 +200,15 @@ class RecommendHistoryManager:
                 })
             return results
         except Exception as e:
-            print(f"Error listing history: {e}")
+            logger.error(
+                "Error listing recommendation history",
+                exc_info=(type(e), e, e.__traceback__),
+                extra={"extra_data": {
+                    "mode": mode,
+                    "limit": limit,
+                    "stage": "recommend_history_list",
+                }},
+            )
             return []
         finally:
             conn.close()
@@ -194,7 +229,14 @@ class RecommendHistoryManager:
             """, (cutoff_str,))
             conn.commit()
         except Exception as e:
-            print(f"Error clearing history: {e}")
+            logger.error(
+                "Error clearing recommendation history",
+                exc_info=(type(e), e, e.__traceback__),
+                extra={"extra_data": {
+                    "days": days,
+                    "stage": "recommend_history_clear_old",
+                }},
+            )
         finally:
             conn.close()
 

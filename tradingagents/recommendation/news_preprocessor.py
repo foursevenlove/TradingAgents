@@ -7,11 +7,15 @@ Process each news item:
 """
 
 import json
+import logging
 import re
 from typing import Dict
 
 from tradingagents.llm_clients import create_llm_client
 from tradingagents.default_config import DEFAULT_CONFIG
+
+
+logger = logging.getLogger("tradingagents.web.recommendation.news_preprocessor")
 
 
 class NewsPreprocessor:
@@ -60,7 +64,15 @@ class NewsPreprocessor:
 
         except Exception as e:
             # Fallback: minimal structured info without LLM
-            print(f"[NewsPreprocessor] LLM error: {e}, using fallback")
+            logger.error(
+                "News preprocessing LLM failed, using fallback",
+                exc_info=(type(e), e, e.__traceback__),
+                extra={"extra_data": {
+                    "stage": "news_preprocess_llm",
+                    "title": title[:120],
+                    "source": source,
+                }},
+            )
             return self._fallback_process(title, content)
 
     def _build_prompt(self, title: str, content: str, source: str) -> str:
@@ -282,7 +294,14 @@ class BatchPreprocessor:
                     "processed": processed,
                 })
             except Exception as e:
-                print(f"[BatchPreprocessor] Error processing {news.get('news_id')}: {e}")
+                logger.error(
+                    "Batch news preprocessing item failed",
+                    exc_info=(type(e), e, e.__traceback__),
+                    extra={"extra_data": {
+                        "stage": "batch_news_preprocess",
+                        "news_id": news.get("news_id"),
+                    }},
+                )
                 continue
 
         return results

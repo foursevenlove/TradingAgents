@@ -22,6 +22,9 @@ from tradingagents.agents.utils.news_data_tools import (
     get_industry_news,
     get_policy_news,
 )
+from tradingagents.agents.utils.social_data_tools import (
+    get_social_sentiment,
+)
 from tradingagents.agents.utils.ashare_market_tools import (
     get_north_bound_flow,
     get_margin_trading,

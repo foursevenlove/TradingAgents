@@ -35,6 +35,7 @@ from tradingagents.agents.utils.agent_utils import (
     get_company_news,
     get_industry_news,
     get_policy_news,
+    get_social_sentiment,
     # A-share specific market indicators
     get_north_bound_flow,
     get_margin_trading,
@@ -213,8 +214,8 @@ class TradingAgentsGraph:
             ),
             "social": ToolNode(
                 [
-                    # News tools for social media analysis
-                    get_news,
+                    # Free social sentiment proxy metrics
+                    get_social_sentiment,
                 ]
             ),
             "news": ToolNode(

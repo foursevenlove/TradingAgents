@@ -10,7 +10,7 @@ import json
 import logging
 import logging.handlers
 import sys
-from datetime import datetime
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Dict, Any, Optional
 
@@ -20,7 +20,7 @@ class JSONFormatter(logging.Formatter):
 
     def format(self, record: logging.LogRecord) -> str:
         log_data: Dict[str, Any] = {
-            "timestamp": datetime.utcnow().isoformat() + "Z",
+            "timestamp": datetime.now(timezone.utc).isoformat().replace("+00:00", "Z"),
             "level": record.levelname,
             "logger": record.name,
             "module": record.module,
@@ -41,15 +41,21 @@ class JSONFormatter(logging.Formatter):
         if hasattr(record, "extra_data") and record.extra_data:
             log_data["data"] = record.extra_data
 
-        return json.dumps(log_data, ensure_ascii=False)
+        return json.dumps(log_data, ensure_ascii=False, default=str)
 
 
 class HumanReadableFormatter(logging.Formatter):
     """Human readable log formatter for console."""
 
     def format(self, record: logging.LogRecord) -> str:
-        timestamp = datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S")
+        timestamp = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S")
         base = f"{timestamp} [{record.levelname}] {record.name}: {record.getMessage()}"
+
+        if hasattr(record, "extra_data") and record.extra_data:
+            try:
+                base += " | " + json.dumps(record.extra_data, ensure_ascii=False, default=str)
+            except Exception:
+                base += f" | {record.extra_data}"
 
         if record.exc_info:
             base += "\n" + self.formatException(record.exc_info)
@@ -177,6 +183,31 @@ def log_exception(exc: Exception, context: Optional[Dict[str, Any]] = None):
         exc_info=exc,
         extra={"extra_data": context or {}},
     )
+
+
+def log_analysis_event(
+    stage: str,
+    message: str,
+    level: int = logging.INFO,
+    task_id: Optional[str] = None,
+    ticker: Optional[str] = None,
+    **context: Any,
+):
+    """Log a structured analysis lifecycle event.
+
+    These logs make it possible to trace a single analysis task across API,
+    runner, LangGraph, tool, and persistence boundaries.
+    """
+    logger = get_logger("tradingagents.web.analysis")
+    data = {
+        "stage": stage,
+        **context,
+    }
+    if task_id:
+        data["task_id"] = task_id
+    if ticker:
+        data["ticker"] = ticker
+    logger.log(level, message, extra={"extra_data": data})
 
 
 def log_api_request(

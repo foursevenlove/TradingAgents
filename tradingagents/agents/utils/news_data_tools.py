@@ -80,7 +80,8 @@ def get_company_news(
     """
     第一层：获取公司直接相关新闻。
     调用 tushare news API（6源分段拉取）+ major_news 长篇通讯，
-    通过公司名+股票代码严格实体筛选，最多返回 20 条。
+    通过公司名+股票代码严格实体筛选，最多返回 15 条。
+    少量高精度结果不会为了凑数强制补充；仅在 Tushare 无直接结果或接口失败时 fallback。
     已预过滤，结果均为与公司直接相关的新闻快讯。
     参数：
         ticker (str): 股票代码
@@ -122,7 +123,7 @@ def get_policy_news(
     """
     第三层：获取政策/宏观新闻。
     调用 tushare cctv_news API，拉取新闻联播文字稿，
-    通过 LLM 筛选与目标股票行业相关的政策条目。
+    通过 LLM 筛选与目标股票行业相关的政策条目，最多返回 10 条。
     参数：
         ticker (str): 股票代码
         look_back_days (int): 回溯天数，默认为3天

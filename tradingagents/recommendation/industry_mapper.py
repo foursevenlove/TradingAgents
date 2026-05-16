@@ -6,6 +6,7 @@ then finds related stocks in those industries.
 Enhanced with LLM-based dynamic mapping when keyword matching fails.
 """
 
+import logging
 import pandas as pd
 from typing import List, Dict, Optional
 
@@ -16,6 +17,9 @@ from tradingagents.market_data.industry_classification import (
 from tradingagents.recommendation.stock_screener import StockScreener
 from tradingagents.llm_clients import create_llm_client
 from tradingagents.default_config import DEFAULT_CONFIG
+
+
+logger = logging.getLogger("tradingagents.web.recommendation.industry_mapper")
 
 
 # Lazy-loaded LLM for dynamic industry mapping
@@ -33,7 +37,12 @@ def _get_industry_llm():
                 base_url=DEFAULT_CONFIG.get("backend_url"),
             )
             _INDUSTRY_LLM = client.get_llm()
-        except Exception:
+        except Exception as exc:
+            logger.warning(
+                "Failed to initialize industry mapping LLM; keyword fallback will be used",
+                exc_info=(type(exc), exc, exc.__traceback__),
+                extra={"extra_data": {"stage": "industry_mapper_llm_init"}},
+            )
             _INDUSTRY_LLM = None
     return _INDUSTRY_LLM
 
@@ -211,7 +220,15 @@ class IndustryMapper:
 
             return industries[:max_industries]
 
-        except Exception:
+        except Exception as exc:
+            logger.warning(
+                "Industry mapping LLM failed",
+                exc_info=(type(exc), exc, exc.__traceback__),
+                extra={"extra_data": {
+                    "stage": "industry_mapper_llm_extract",
+                    "theme_name": theme.get("name"),
+                }},
+            )
             return []
 
     def map_theme_to_industries(
@@ -337,7 +354,15 @@ class IndustryMapper:
                     # This will use industry name from theme
                     # Actually need to call with a real stock in that industry
                     # For now, skip this fallback
-                except Exception:
+                except Exception as exc:
+                    logger.warning(
+                        "Industry peer fallback failed",
+                        exc_info=(type(exc), exc, exc.__traceback__),
+                        extra={"extra_data": {
+                            "stage": "industry_mapper_peer_fallback",
+                            "industry": industry,
+                        }},
+                    )
                     continue
 
         # Select top stocks for this theme

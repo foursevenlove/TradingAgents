@@ -1,4 +1,6 @@
 from concurrent.futures import ThreadPoolExecutor, TimeoutError as FutureTimeoutError
+import logging
+import time
 from typing import Annotated
 
 # Import from vendor-specific modules
@@ -77,6 +79,7 @@ from .akshare import (
     get_industry_news as get_akshare_industry_news,
     get_policy_news as get_akshare_policy_news,
     get_recommendation_news as get_akshare_recommendation_news,
+    get_social_sentiment as get_akshare_social_sentiment,
     # A-share specific indicators
     get_north_bound_flow as get_akshare_north_bound_flow,
     get_margin_trading as get_akshare_margin_trading,
@@ -122,6 +125,41 @@ from .tushare_stock import (
 from .config import get_config
 
 
+_DATAFLOW_LOGGER = logging.getLogger("tradingagents.web.dataflows")
+
+
+def _compact_value(value, max_length: int = 240):
+    """Keep log context useful without dumping large payloads or dataframes."""
+    if value is None or isinstance(value, (str, int, float, bool)):
+        compact = value
+    else:
+        compact = repr(value)
+
+    if isinstance(compact, str) and len(compact) > max_length:
+        return compact[:max_length] + "..."
+    return compact
+
+
+def _compact_args(args, kwargs):
+    return {
+        "args": [_compact_value(arg) for arg in args],
+        "kwargs": {key: _compact_value(value) for key, value in kwargs.items()},
+    }
+
+
+def _log_data_source_event(level: int, message: str, **data):
+    _DATAFLOW_LOGGER.log(level, message, extra={"extra_data": data})
+
+
+def _summarize_failures(failures):
+    if not failures:
+        return "no vendor was attempted"
+    return "; ".join(
+        f"{item['vendor']} {item['error_type']}: {item['error']}"
+        for item in failures
+    )
+
+
 def _call_with_timeout(func, timeout_seconds, *args, **kwargs):
     """Call a function with a timeout. Raises TimeoutError if exceeded."""
     with ThreadPoolExecutor(max_workers=1) as executor:
@@ -130,9 +168,6 @@ def _call_with_timeout(func, timeout_seconds, *args, **kwargs):
             return future.result(timeout=timeout_seconds)
         except FutureTimeoutError:
             raise TimeoutError(f"Data source call timed out after {timeout_seconds}s")
-
-
-import time
 
 
 class _CircuitBreaker:
@@ -208,6 +243,7 @@ TOOLS_CATEGORIES = {
             "get_company_news",
             "get_industry_news",
             "get_policy_news",
+            "get_social_sentiment",
             "get_cctv_news",
             "get_insider_transactions",
             "get_recommendation_news",
@@ -337,6 +373,9 @@ VENDOR_METHODS = {
         "akshare": get_akshare_recommendation_news,
         "tushare": get_tushare_recommendation_news,
     },
+    "get_social_sentiment": {
+        "akshare": get_akshare_social_sentiment,
+    },
     # ashare_market_indicators
     "get_north_bound_flow": {
         "akshare": get_akshare_north_bound_flow,
@@ -442,16 +481,70 @@ def route_to_vendor(method: str, *args, **kwargs):
     else:
         timeout_sec = get_config().get("tool_timeout", 90)
 
+    call_context = {
+        "method": method,
+        "category": category,
+        "configured_vendors": primary_vendors,
+        "fallback_vendors": fallback_vendors,
+        "timeout_sec": timeout_sec,
+        **_compact_args(args, kwargs),
+    }
+    failures = []
+
+    _log_data_source_event(logging.INFO, "Data source route started", **call_context)
+
+    def _record_failure(vendor: str, exc: Exception):
+        failure = {
+            "vendor": vendor,
+            "error_type": type(exc).__name__,
+            "error": str(exc),
+        }
+        failures.append(failure)
+        return failure
+
+    def _raise_exhausted():
+        summary = _summarize_failures(failures)
+        _log_data_source_event(
+            logging.ERROR,
+            "Data source fallback exhausted",
+            **call_context,
+            failures=failures,
+            failure_summary=summary,
+        )
+        raise RuntimeError(f"No available vendor for '{method}'. Failures: {summary}")
+
     def _try_vendor(vendor: str, impl_func):
         """Call a vendor implementation with circuit breaker and timeout."""
-        if _circuit_breaker.is_open(vendor):
-            raise TimeoutError(f"Circuit breaker open for {vendor}")
+        attempt_context = {**call_context, "vendor": vendor}
+        _log_data_source_event(logging.INFO, "Data source call started", **attempt_context)
+        start_time = time.time()
         try:
+            if _circuit_breaker.is_open(vendor):
+                raise TimeoutError(f"Circuit breaker open for {vendor}")
             result = _call_with_timeout(impl_func, timeout_sec, *args, **kwargs)
             _circuit_breaker.record_success(vendor)
+            duration_ms = (time.time() - start_time) * 1000
+            _log_data_source_event(
+                logging.INFO,
+                "Data source call succeeded",
+                **attempt_context,
+                duration_ms=round(duration_ms, 1),
+                result_type=type(result).__name__,
+                result_preview=_compact_value(result),
+            )
             return result
-        except (AlphaVantageRateLimitError, TushareNewsDataError, TushareStockDataError, AkshareDataError, TimeoutError):
+        except Exception as exc:
             _circuit_breaker.record_failure(vendor)
+            duration_ms = (time.time() - start_time) * 1000
+            failure = _record_failure(vendor, exc)
+            failure_log = {key: value for key, value in failure.items() if key != "vendor"}
+            _log_data_source_event(
+                logging.WARNING,
+                "Data source call failed",
+                **attempt_context,
+                duration_ms=round(duration_ms, 1),
+                **failure_log,
+            )
             raise
 
     # Special handling for news methods - prefer tushare data over empty akshare fallback
@@ -470,14 +563,14 @@ def route_to_vendor(method: str, *args, **kwargs):
                     # Extract tushare content (remove fallback marker)
                     tushare_content = tushare_result.replace("_FALLBACK_TO_AKSHARE_", "").strip()
 
-                    # Only call akshare if tushare returned very few results (< 10 for company_news, < 5 for industry_news)
-                    # Otherwise, tushare data is sufficient
+                    # Only call akshare when tushare explicitly reports no usable data.
+                    # Sparse but non-empty company news is still more reliable than forced supplements.
                     if method in ["get_company_news"] and "# Final:" in tushare_content:
                         # Parse final count from header
                         import re
                         match = re.search(r'# Final: (\d+)', tushare_content)
                         final_count = int(match.group(1)) if match else 0
-                        if final_count >= 10:
+                        if final_count > 0:
                             return tushare_content
 
                     # For get_industry_news, tushare usually returns 20 items with LLM summarization
@@ -500,7 +593,7 @@ def route_to_vendor(method: str, *args, **kwargs):
                             if akshare_result and "No data available" not in akshare_result:
                                 # Combine results
                                 return tushare_content + "\n\n# === AKSHARE SUPPLEMENT (补充数据) ===\n" + akshare_result
-                        except (AkshareDataError, Exception):
+                        except Exception:
                             pass
 
                     # Return tushare content without fallback marker if akshare failed
@@ -508,7 +601,7 @@ def route_to_vendor(method: str, *args, **kwargs):
                 else:
                     # Tushare returned valid data without fallback marker, use it
                     return tushare_result
-            except (TushareNewsDataError, TushareDataError, TimeoutError):
+            except Exception:
                 tushare_result = None
 
         # If tushare not available or failed, try other vendors
@@ -523,10 +616,10 @@ def route_to_vendor(method: str, *args, **kwargs):
 
             try:
                 return _try_vendor(vendor, impl_func)
-            except (AlphaVantageRateLimitError, TushareNewsDataError, TushareStockDataError, AkshareDataError, TimeoutError):
+            except Exception:
                 continue
 
-        raise RuntimeError(f"No available vendor for '{method}'")
+        _raise_exhausted()
 
     # Standard fallback for non-news methods
     for vendor in fallback_vendors:
@@ -538,7 +631,7 @@ def route_to_vendor(method: str, *args, **kwargs):
 
         try:
             return _try_vendor(vendor, impl_func)
-        except (AlphaVantageRateLimitError, TushareNewsDataError, TushareStockDataError, TimeoutError):
-            continue  # Rate limits, timeouts and Tushare config errors trigger fallback
+        except Exception:
+            continue
 
-    raise RuntimeError(f"No available vendor for '{method}'")
+    _raise_exhausted()

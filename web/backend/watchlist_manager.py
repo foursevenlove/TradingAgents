@@ -1,11 +1,15 @@
 """Watchlist, schedule config, and batch run CRUD."""
 import sqlite3
 import json
+import logging
 from datetime import datetime
 from pathlib import Path
 from typing import List, Optional
 
 from .config import WEB_CONFIG
+
+
+logger = logging.getLogger("tradingagents.web.watchlist")
 
 
 class WatchlistManager:
@@ -141,7 +145,15 @@ class WatchlistManager:
         if result.get("config") and isinstance(result["config"], str):
             try:
                 result["config"] = json.loads(result["config"])
-            except Exception:
+            except Exception as exc:
+                logger.warning(
+                    "Failed to parse schedule config JSON, using empty config",
+                    exc_info=(type(exc), exc, exc.__traceback__),
+                    extra={"extra_data": {
+                        "stage": "watchlist_schedule_config_parse",
+                        "raw_config": result.get("config"),
+                    }},
+                )
                 result["config"] = {}
         return result
 
