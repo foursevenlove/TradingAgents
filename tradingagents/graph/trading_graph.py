@@ -139,6 +139,7 @@ class TradingAgentsGraph:
             self.invest_judge_memory,
             self.risk_manager_memory,
             self.conditional_logic,
+            callbacks=self.callbacks,
         )
 
         self.propagator = Propagator()
@@ -326,6 +327,8 @@ class TradingAgentsGraph:
                 "bull_history": final_state["investment_debate_state"]["bull_history"],
                 "bear_history": final_state["investment_debate_state"]["bear_history"],
                 "history": final_state["investment_debate_state"]["history"],
+                "debate_turns": final_state["investment_debate_state"].get("debate_turns", []),
+                "latest_speaker": final_state["investment_debate_state"].get("latest_speaker", ""),
                 "current_response": final_state["investment_debate_state"][
                     "current_response"
                 ],
@@ -339,6 +342,7 @@ class TradingAgentsGraph:
                 "conservative_history": final_state["risk_debate_state"]["conservative_history"],
                 "neutral_history": final_state["risk_debate_state"]["neutral_history"],
                 "history": final_state["risk_debate_state"]["history"],
+                "risk_turns": final_state["risk_debate_state"].get("risk_turns", []),
                 "judge_decision": final_state["risk_debate_state"]["judge_decision"],
             },
             "investment_plan": final_state["investment_plan"],

@@ -1,8 +1,6 @@
 from datetime import datetime, timedelta
-import uuid
 
 from langchain_core.prompts import ChatPromptTemplate, MessagesPlaceholder
-from langchain_core.messages import AIMessage
 
 from tradingagents.agents.utils.agent_utils import (
     get_company_news,
@@ -11,53 +9,11 @@ from tradingagents.agents.utils.agent_utils import (
 )
 
 
-REQUIRED_NEWS_TOOLS = ("get_company_news", "get_industry_news", "get_policy_news")
-
-
 def _get_news_date_range(trade_date: str) -> tuple[str, str]:
     """Return the 3-day lookback window ending at trade_date."""
     end_day = datetime.strptime(str(trade_date)[:10], "%Y-%m-%d")
     start_day = end_day - timedelta(days=3)
     return start_day.strftime("%Y-%m-%d"), end_day.strftime("%Y-%m-%d")
-
-
-def _executed_news_tools(messages) -> set[str]:
-    """Infer completed news tool names from ToolMessages and prior AI tool calls."""
-    tool_call_names = {}
-    executed = set()
-
-    for message in messages:
-        for tool_call in getattr(message, "tool_calls", None) or []:
-            name = tool_call.get("name")
-            tool_id = tool_call.get("id")
-            if name in REQUIRED_NEWS_TOOLS and tool_id:
-                tool_call_names[tool_id] = name
-
-        if type(message).__name__ == "ToolMessage":
-            name = getattr(message, "name", None)
-            if name in REQUIRED_NEWS_TOOLS:
-                executed.add(name)
-                continue
-
-            tool_call_id = getattr(message, "tool_call_id", None)
-            if tool_call_id in tool_call_names:
-                executed.add(tool_call_names[tool_call_id])
-
-    return executed
-
-
-def _forced_news_tool_call(tool_name: str, ticker: str, start_date: str, end_date: str):
-    args = {"ticker": ticker}
-    if tool_name in ("get_company_news", "get_industry_news"):
-        args.update({"start_date": start_date, "end_date": end_date})
-    else:
-        args.update({"look_back_days": 3, "end_date": end_date})
-
-    return {
-        "name": tool_name,
-        "args": args,
-        "id": f"call_{tool_name}_{uuid.uuid4().hex[:8]}",
-    }
 
 
 def create_news_analyst(llm):
@@ -154,22 +110,8 @@ def create_news_analyst(llm):
         prompt = prompt.partial(ticker=ticker)
 
         chain = prompt | llm.bind_tools(tools)
-        result = chain.invoke(state["messages"])
 
-        if len(result.tool_calls) == 0:
-            executed_tools = _executed_news_tools(state.get("messages", []))
-            missing_tools = [
-                name for name in REQUIRED_NEWS_TOOLS if name not in executed_tools
-            ]
-            if missing_tools:
-                forced_calls = [
-                    _forced_news_tool_call(name, ticker, start_date, end_date)
-                    for name in missing_tools
-                ]
-                return {
-                    "messages": [AIMessage(content="", tool_calls=forced_calls)],
-                    "news_report": "",
-                }
+        result = chain.invoke(state["messages"])
 
         report = ""
 

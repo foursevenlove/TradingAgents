@@ -8,6 +8,39 @@ import pandas as pd
 
 from .akshare_common import _convert_ticker_format, _format_to_csv, AkshareDataError
 
+NEWS_CONTENT_CHAR_LIMIT = 500
+NEWS_TOOL_OUTPUT_CHAR_LIMIT = 60000
+
+
+def _strip_html(text: str) -> str:
+    if not text:
+        return ""
+    clean = re.sub(r"<[^>]+>", "", str(text))
+    clean = re.sub(r"\s+", " ", clean).strip()
+    return clean
+
+
+def _format_bounded_news_csv(
+    df: pd.DataFrame,
+    header_info: Optional[str],
+    text_limits: dict[str, int],
+    max_chars: int = NEWS_TOOL_OUTPUT_CHAR_LIMIT,
+) -> str:
+    if df.empty:
+        return _format_to_csv(df, header_info)
+
+    bounded_df = df.copy()
+    for column, limit in text_limits.items():
+        if column in bounded_df.columns:
+            bounded_df[column] = bounded_df[column].apply(
+                lambda value: _strip_html(str(value))[:limit]
+            )
+
+    output = _format_to_csv(bounded_df, header_info)
+    if len(output) <= max_chars:
+        return output
+    return output[:max_chars].rstrip() + "\n# NOTE: Output hard-truncated to keep LLM input bounded."
+
 # Industry classification for keyword expansion
 try:
     from tradingagents.market_data.industry_classification import get_sw_industry
@@ -154,8 +187,8 @@ def get_news(
             "关键词": "source_keyword",
         })
 
-        # Limit to top 20 most recent items
-        df = df.head(20)
+        # Limit to top 15 most recent high-precision items
+        df = df.head(15)
 
         header = f"# News for {ticker}\n"
         header += f"# Company name: {company_name or 'N/A'}\n"
@@ -166,7 +199,7 @@ def get_news(
         if date_range_info:
             header += date_range_info
 
-        return _format_to_csv(df, header)
+        return _format_bounded_news_csv(df, header, {"content": NEWS_CONTENT_CHAR_LIMIT})
 
     except Exception as e:
         raise AkshareDataError(f"Failed to get news for {ticker}: {str(e)}")
@@ -355,7 +388,7 @@ def get_industry_news(
         header += f"# Total: {len(df)} | Filtered: {len(filtered)} | Final: {len(final_df)}\n"
         header += f"# Note: Fallback data, no LLM summarization\n"
 
-        return _format_to_csv(final_df, header)
+        return _format_bounded_news_csv(final_df, header, {"content": NEWS_CONTENT_CHAR_LIMIT})
 
     except Exception as e:
         return f"# 第二层 · 产业链/行业新闻 ({ticker}) — akshare fallback\n# Error: {str(e)}\n"
@@ -394,14 +427,14 @@ def get_policy_news(
             header += "No data available\n"
             return header
 
-        merged = pd.concat(all_cctv, ignore_index=True)
+        merged = pd.concat(all_cctv, ignore_index=True).head(10)
 
         header = f"# 第三层 · 政策新闻 ({ticker}) — akshare fallback\n"
         header += f"# Date range: {(end_day - timedelta(days=look_back_days-1)).strftime('%Y-%m-%d')} to {end_day.strftime('%Y-%m-%d')}\n"
         header += f"# Total items: {len(merged)}\n"
         header += f"# Note: Fallback data, no LLM filtering\n"
 
-        return _format_to_csv(merged, header)
+        return _format_bounded_news_csv(merged, header, {"content": NEWS_CONTENT_CHAR_LIMIT})
 
     except Exception as e:
         return f"# 第三层 · 政策新闻 ({ticker}) — akshare fallback\n# Error: {str(e)}\n"

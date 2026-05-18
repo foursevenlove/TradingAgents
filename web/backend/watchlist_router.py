@@ -156,6 +156,10 @@ async def update_schedule(req: ScheduleUpdateRequest):
             cr = croniter(req.cron_expression, datetime.now())
             next_run = cr.get_next(datetime)
             wm.update_schedule_next_run(next_run.isoformat())
+            schedule["next_run_at"] = next_run.isoformat()
+        else:
+            wm.update_schedule_next_run(None)
+            schedule["next_run_at"] = None
 
     return schedule
 

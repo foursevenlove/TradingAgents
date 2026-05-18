@@ -52,8 +52,8 @@ class AnalyzeRequest(BaseModel):
         default=["market", "social", "news", "fundamentals"],
         description="启用的分析师类型"
     )
-    max_debate_rounds: Optional[int] = Field(None, description="多空辩论轮数")
-    max_risk_discuss_rounds: Optional[int] = Field(None, description="风险讨论轮数")
+    max_debate_rounds: Optional[int] = Field(None, ge=1, le=5, description="多空辩论轮数")
+    max_risk_discuss_rounds: Optional[int] = Field(None, ge=1, le=5, description="风险讨论轮数")
     data_vendors: Optional[Dict[str, str]] = Field(None, description="数据源配置覆盖")
 
     @field_validator("ticker")

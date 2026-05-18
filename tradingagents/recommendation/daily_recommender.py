@@ -15,6 +15,7 @@ import pandas as pd
 from tradingagents.recommendation.theme_extractor import ThemeExtractor
 from tradingagents.recommendation.stock_screener import StockScreener
 from tradingagents.recommendation.industry_mapper import IndustryMapper
+from tradingagents.recommendation.analysis_validator import TradingAgentsValidator
 from tradingagents.default_config import DEFAULT_CONFIG
 
 
@@ -51,39 +52,12 @@ class DailyRecommender:
         light_config["max_risk_discuss_rounds"] = 1
 
         try:
-            from tradingagents.graph.trading_graph import TradingAgentsGraph
-
-            # Create graph with only market + news analysts
-            graph = TradingAgentsGraph(
+            validator = TradingAgentsValidator(
                 selected_analysts=["market", "news"],
-                debug=False,
                 config=light_config,
+                debug=False,
             )
-
-            # Run analysis
-            state = graph.propagate(stock_code, trade_date)
-
-            # Extract decision signal
-            decision = state.get("final_decision", "hold")
-            confidence = state.get("final_decision_confidence", 0.5)
-
-            # Get market and news analyst summaries
-            market_summary = ""
-            news_summary = ""
-
-            if "market_analyst_report" in state:
-                market_summary = state["market_analyst_report"][:500]
-            if "news_analyst_report" in state:
-                news_summary = state["news_analyst_report"][:500]
-
-            return {
-                "code": stock_code,
-                "decision": decision,
-                "confidence": confidence,
-                "market_summary": market_summary,
-                "news_summary": news_summary,
-                "reason": f"市场分析: {decision} (置信度{confidence:.0%})",
-            }
+            return validator.validate(stock_code, trade_date)
 
         except Exception as e:
             logger.error(
@@ -139,8 +113,11 @@ class DailyRecommender:
             trade_date = datetime.now().strftime("%Y-%m-%d")
 
         # 1. Extract themes from news (daily: look_back_days=1)
-        themes = self.theme_extractor.get_today_themes(look_back_days=1)
-        themes = themes[:max_themes]
+        themes = self.theme_extractor.extract_themes_from_cache(
+            look_back_days=1,
+            max_themes=max_themes,
+            as_of_date=trade_date,
+        )
 
         # 2. Screen stocks
         screened_stocks = self.stock_screener.screen(

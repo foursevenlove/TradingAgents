@@ -104,6 +104,12 @@ class LLMTimeoutError(LLMError):
     user_message = "AI 模型响应超时，请稍后重试"
 
 
+class LLMAccountError(LLMError):
+    """LLM account cannot serve requests due to billing/quota status."""
+    error_code = "LLM_ACCOUNT_ERROR"
+    user_message = "AI 模型账号不可用，请检查额度或欠费状态"
+
+
 class DataSourceError(TradingAgentsError):
     """Data source API call failed."""
     error_code = "DATA_SOURCE_ERROR"
@@ -181,6 +187,24 @@ def classify_exception(exc: Exception) -> TradingAgentsError:
     """
     exc_str = str(exc)
     exc_type = type(exc).__name__
+    exc_lower = exc_str.lower()
+    exc_type_lower = exc_type.lower()
+
+    timeout_indicators = [
+        "timeout", "timed out", "readtimeout", "apitimeouterror",
+    ]
+
+    if any(ind in exc_lower or ind in exc_type_lower for ind in timeout_indicators):
+        llm_timeout_types = ["apitimeouterror", "readtimeout"]
+        if any(ind in exc_type_lower for ind in llm_timeout_types):
+            return LLMTimeoutError(detail=exc_str)
+
+    account_indicators = [
+        "arrearage", "overdue-payment", "insufficient_quota",
+        "exceeded your current quota", "good standing",
+    ]
+    if any(ind in exc_lower for ind in account_indicators):
+        return LLMAccountError(detail=exc_str)
 
     # Check for LLM-related errors
     llm_indicators = [
@@ -188,9 +212,13 @@ def classify_exception(exc: Exception) -> TradingAgentsError:
         "openai", "anthropic", "minimax", "dashscope", "alibaba",
         "aliyun_coding_plan", "coding_plan",
         "connection refused", "timeout", "503", "502", "429",
+        "invalid_request_error", "invalid_parameter_error",
+        "range of input length", "input length",
+        "api connection", "apiconnectionerror", "connection error",
+        "connection reset by peer",
     ]
-    if any(ind in exc_str.lower() for ind in llm_indicators):
-        if "timeout" in exc_str.lower() or exc_type == "TimeoutError":
+    if any(ind in exc_lower or ind in exc_type_lower for ind in llm_indicators):
+        if any(ind in exc_lower or ind in exc_type_lower for ind in timeout_indicators):
             return LLMTimeoutError(detail=exc_str)
         return LLMError(detail=exc_str)
 
@@ -200,13 +228,13 @@ def classify_exception(exc: Exception) -> TradingAgentsError:
         "data", "stock", "price", "indicator", "news",
         "vendor", "route_to_vendor",
     ]
-    if any(ind in exc_str.lower() for ind in data_indicators):
-        if "timeout" in exc_str.lower() or exc_type == "TimeoutError":
+    if any(ind in exc_lower for ind in data_indicators):
+        if any(ind in exc_lower or ind in exc_type_lower for ind in timeout_indicators):
             return DataSourceTimeoutError(detail=exc_str)
         return DataSourceError(detail=exc_str)
 
     # Check for timeout specifically
-    if exc_type == "TimeoutError" or "timeout" in exc_str.lower():
+    if any(ind in exc_lower or ind in exc_type_lower for ind in timeout_indicators):
         return TradingAgentsError(
             detail=exc_str,
             user_message="操作超时，请稍后重试",

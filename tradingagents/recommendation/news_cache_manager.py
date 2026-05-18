@@ -17,6 +17,8 @@ from datetime import datetime, timedelta
 from typing import List, Dict, Optional
 from pathlib import Path
 
+from tradingagents.recommendation.news_parsing import parse_recommendation_news_csv
+
 # Cache directory
 CACHE_DIR = Path(__file__).parent / "cache"
 CACHE_DB_PATH = CACHE_DIR / "news_cache.db"
@@ -254,36 +256,9 @@ class NewsCacheManager:
 
     def _parse_csv_to_list(self, csv_string: str) -> List[Dict]:
         """Parse CSV string to list of news dicts."""
-        if not csv_string or "No news" in csv_string:
-            return []
-
-        lines = csv_string.strip().split('\n')
-
-        # Find header line
-        header_idx = 0
-        for i, line in enumerate(lines):
-            if not line.startswith('#') and line.strip():
-                header_idx = i
-                break
-
-        if header_idx >= len(lines):
-            return []
-
-        headers = [h.strip() for h in lines[header_idx].split(',')]
         news_list = []
-
-        for line in lines[header_idx + 1:]:
-            if not line.strip() or line.startswith('#'):
-                continue
-
-            values = line.split(',')
-            row = {}
-            for i, h in enumerate(headers):
-                if i < len(values):
-                    row[h] = values[i].strip()
-
-            # Get datetime - handle missing datetime column
-            datetime_str = row.get("datetime", row.get("pub_time", ""))
+        for row in parse_recommendation_news_csv(csv_string):
+            datetime_str = row.get("datetime", "")
             if not datetime_str:
                 # Use current time as fallback when datetime is missing
                 datetime_str = datetime.now().strftime("%Y-%m-%d %H:%M:%S")

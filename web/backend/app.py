@@ -14,7 +14,6 @@ from .router import router
 from .config import WEB_CONFIG
 from .watchlist_router import router as watchlist_router, init_watchlist_manager
 from .holdings_router import router as holdings_router, init_holdings_manager
-from .recommend_router import router as recommend_router
 from .scheduler_service import create_scheduler, get_scheduler
 from pydantic import ValidationError as PydanticValidationError
 
@@ -30,10 +29,6 @@ setup_logging(
     log_level=WEB_CONFIG.get("log_level", "INFO"),
 )
 _logger = get_server_logger()
-
-# News cache manager (for recommendation system)
-from tradingagents.recommendation.news_cache_manager import get_cache_manager as get_news_cache_manager
-
 
 _SENSITIVE_PATTERNS = [
     ("api_key", "API_KEY_REDACTED"),
@@ -86,16 +81,11 @@ async def lifespan(app: FastAPI):
     scheduler = create_scheduler(wm)
     await scheduler.start()
 
-    # Start news cache background update (for recommendation system)
-    news_cache = get_news_cache_manager()
-    news_cache.start_background_update()
-    _logger.info("News cache background update started")
+    _logger.info("Recommendation system disabled; news cache background update skipped")
 
     yield
 
     # Shutdown
-    news_cache.stop_background_update()
-    _logger.info("News cache background update stopped")
     await scheduler.stop()
 
 
@@ -226,7 +216,6 @@ def create_app() -> FastAPI:
     app.include_router(router)
     app.include_router(watchlist_router)
     app.include_router(holdings_router)
-    app.include_router(recommend_router)
 
     # Serve frontend static files if built
     frontend_dist = Path(WEB_CONFIG["frontend_dist"])

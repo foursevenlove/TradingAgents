@@ -7,16 +7,22 @@ import WatchlistView from './views/WatchlistView.vue'
 import HoldingsView from './views/HoldingsView.vue'
 import BatchRunsView from './views/BatchRunsView.vue'
 import BatchRunDetail from './views/BatchRunDetail.vue'
-import RecommendView from './views/RecommendView.vue'
 
 const routes = [
   { path: '/', name: 'Home', component: HomeView },
+  {
+    path: '/analyze/:taskId/result',
+    redirect: to => ({ name: 'Report', params: { taskId: to.params.taskId } }),
+  },
+  {
+    path: '/analyze/:taskId/usage',
+    redirect: to => ({ name: 'Report', params: { taskId: to.params.taskId } }),
+  },
   { path: '/analyze/:taskId', name: 'Analyze', component: AnalyzeView, props: true },
   { path: '/report/:taskId', name: 'Report', component: ReportView, props: true },
   { path: '/history', name: 'History', component: HistoryView },
   { path: '/watchlist', name: 'Watchlist', component: WatchlistView },
   { path: '/holdings', name: 'Holdings', component: HoldingsView },
-  { path: '/recommend', name: 'Recommend', component: RecommendView },
   { path: '/batch', name: 'BatchRuns', component: BatchRunsView },
   { path: '/batch/:batchId', name: 'BatchRunDetail', component: BatchRunDetail, props: true },
 ]

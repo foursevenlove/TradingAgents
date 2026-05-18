@@ -19,6 +19,13 @@
         >
           {{ statusText }}
         </span>
+        <button
+          class="btn-secondary text-sm"
+          :disabled="refreshing"
+          @click="manualRefresh"
+        >
+          {{ refreshing ? '刷新中...' : '刷新' }}
+        </button>
         <span v-if="errorMsg" class="text-xs text-red-600 bg-red-50 px-3 py-1 rounded-full font-medium max-w-md truncate" :title="errorMsg">
           {{ errorMsg }}
         </span>
@@ -192,6 +199,7 @@ const selectedAgent = ref('Market Analyst')  // Default to first analyst
 const userExplicitlySelected = ref(false)  // Track if user clicked to select
 const viewMode = ref('process')  // 'process' or 'report'
 const errorMsg = ref('')
+const refreshing = ref(false)
 let cleanup = null
 
 const isRunning = computed(() => status.value === 'running' || status.value === 'pending')
@@ -313,22 +321,17 @@ function handleEvent(event) {
     taskStore.setStatus('completed')
     // Reset user selection when analysis completes
     userExplicitlySelected.value = false
-    // Load result data immediately when task completes via SSE
-    loadTaskInfo().then(() => {
-      // After loading status, also load result if available
-      api.getHistoryDetail(props.taskId).then(detail => {
-        if (detail?.result) {
-          result.value = detail.result
-          if (detail.signal) signal.value = detail.signal
-        }
-      }).catch(() => {})
-    })
+    refreshTaskData({ retries: 5, retryDelay: 800, showReport: true })
   }
   if (event.type === 'failed') {
     status.value = 'failed'
     errorMsg.value = event.data.error || '分析失败'
     taskStore.setStatus('failed')
   }
+}
+
+function sleep(ms) {
+  return new Promise(resolve => setTimeout(resolve, ms))
 }
 
 async function loadTaskInfo() {
@@ -345,6 +348,51 @@ async function loadTaskInfo() {
     console.error('load task info failed', e)
     return null
   }
+}
+
+async function loadTaskResult() {
+  const res = await api.getResult(props.taskId)
+  if (res?.result) {
+    result.value = res.result
+    signal.value = res.signal || signal.value || ''
+    return true
+  }
+
+  const detail = await api.getHistoryDetail(props.taskId)
+  if (detail?.result) {
+    result.value = detail.result
+    signal.value = detail.signal || signal.value || ''
+    return true
+  }
+
+  return false
+}
+
+async function refreshTaskData({ retries = 1, retryDelay = 600, showReport = false } = {}) {
+  refreshing.value = true
+  try {
+    for (let attempt = 0; attempt < retries; attempt += 1) {
+      const currentStatus = await loadTaskInfo()
+      if (currentStatus === 'completed') {
+        const loaded = await loadTaskResult()
+        if (loaded) {
+          if (showReport) viewMode.value = 'report'
+          return true
+        }
+      }
+      if (attempt < retries - 1) await sleep(retryDelay)
+    }
+    return false
+  } catch (e) {
+    console.error('refresh task data failed', e)
+    return false
+  } finally {
+    refreshing.value = false
+  }
+}
+
+async function manualRefresh() {
+  await refreshTaskData({ retries: 2, retryDelay: 500, showReport: status.value === 'completed' })
 }
 
 async function loadHistoricalEvents() {
@@ -385,6 +433,9 @@ onMounted(async () => {
   } else {
     // Task already finished — just replay all events from DB
     await loadHistoricalEvents()
+    if (currentStatus === 'completed' && !result.value) {
+      await refreshTaskData({ retries: 3, retryDelay: 800, showReport: true })
+    }
     // For completed tasks, show report view by default if we have a result
     if (currentStatus === 'completed' && result.value) {
       viewMode.value = 'report'

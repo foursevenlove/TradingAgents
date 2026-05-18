@@ -164,6 +164,7 @@ def select_shallow_thinking_agent(provider) -> str:
             ("Z.AI GLM 4.5 Air (free)", "z-ai/glm-4.5-air:free"),
         ],
         "aliyun_coding_plan": [
+            ("GLM-5 - Coding Plan 默认模型", "glm-5"),
             ("Kimi K2.5 - Coding Plan 推荐模型", "kimi-k2.5"),
             ("Qwen3.6 Plus - 多模态", "qwen3.6-plus"),
             ("Qwen3 Coder Plus - 代码任务", "qwen3-coder-plus"),
@@ -241,6 +242,7 @@ def select_deep_thinking_agent(provider) -> str:
             ("NVIDIA Nemotron 3 Nano 30B (free)", "nvidia/nemotron-3-nano-30b-a3b:free"),
         ],
         "aliyun_coding_plan": [
+            ("GLM-5 - Coding Plan 默认模型", "glm-5"),
             ("Kimi K2.5 - Coding Plan 推荐模型", "kimi-k2.5"),
             ("Qwen3.6 Plus - 多模态", "qwen3.6-plus"),
             ("Qwen3 Max - 强推理", "qwen3-max-2026-01-23"),

@@ -162,12 +162,21 @@ def _summarize_failures(failures):
 
 def _call_with_timeout(func, timeout_seconds, *args, **kwargs):
     """Call a function with a timeout. Raises TimeoutError if exceeded."""
-    with ThreadPoolExecutor(max_workers=1) as executor:
-        future = executor.submit(func, *args, **kwargs)
-        try:
-            return future.result(timeout=timeout_seconds)
-        except FutureTimeoutError:
-            raise TimeoutError(f"Data source call timed out after {timeout_seconds}s")
+    executor = ThreadPoolExecutor(max_workers=1)
+    future = executor.submit(func, *args, **kwargs)
+    timed_out = False
+
+    try:
+        return future.result(timeout=timeout_seconds)
+    except FutureTimeoutError:
+        timed_out = True
+        future.cancel()
+        raise TimeoutError(f"Data source call timed out after {timeout_seconds}s")
+    finally:
+        # Do not use ThreadPoolExecutor as a context manager here: __exit__ waits
+        # for the worker to finish, which turns a 90s timeout into an unbounded
+        # wait when a vendor call is stuck in network I/O.
+        executor.shutdown(wait=not timed_out, cancel_futures=True)
 
 
 class _CircuitBreaker:

@@ -14,9 +14,6 @@
               <router-link to="/" class="text-gray-600 hover:text-gray-900 px-3 py-2 text-sm font-medium" active-class="text-primary-600">
                 首页
               </router-link>
-              <router-link to="/recommend" class="text-gray-600 hover:text-gray-900 px-3 py-2 text-sm font-medium" active-class="text-primary-600">
-                推荐
-              </router-link>
               <router-link to="/watchlist" class="text-gray-600 hover:text-gray-900 px-3 py-2 text-sm font-medium" active-class="text-primary-600">
                 自选股
               </router-link>
@@ -39,7 +36,6 @@
       <!-- Mobile nav -->
       <div class="sm:hidden flex justify-around border-t border-gray-100 py-1">
         <router-link to="/" class="text-gray-500 text-xs py-1">首页</router-link>
-        <router-link to="/recommend" class="text-gray-500 text-xs py-1">推荐</router-link>
         <router-link to="/watchlist" class="text-gray-500 text-xs py-1">自选股</router-link>
         <router-link to="/holdings" class="text-gray-500 text-xs py-1">持仓</router-link>
         <router-link to="/batch" class="text-gray-500 text-xs py-1">批量</router-link>

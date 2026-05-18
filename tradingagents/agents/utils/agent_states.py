@@ -8,6 +8,20 @@ from langgraph.graph import END, StateGraph, START, MessagesState
 
 
 # Researcher team state
+class DebateTurn(TypedDict):
+    speaker: Annotated[str, "Speaker side: bull or bear"]
+    label: Annotated[str, "Human readable speaker label"]
+    round: Annotated[int, "Debate round number"]
+    content: Annotated[str, "Speaker content without display prefix"]
+
+
+class RiskTurn(TypedDict):
+    speaker: Annotated[str, "Speaker side: aggressive, conservative, or neutral"]
+    label: Annotated[str, "Human readable speaker label"]
+    round: Annotated[int, "Risk debate round number"]
+    content: Annotated[str, "Speaker content without display prefix"]
+
+
 class InvestDebateState(TypedDict):
     bull_history: Annotated[
         str, "Bullish Conversation history"
@@ -16,6 +30,10 @@ class InvestDebateState(TypedDict):
         str, "Bearish Conversation history"
     ]  # Bullish Conversation history
     history: Annotated[str, "Conversation history"]  # Conversation history
+    debate_turns: Annotated[
+        list[DebateTurn], "Structured debate turns in chronological order"
+    ]
+    latest_speaker: Annotated[str, "Latest speaker side: bull or bear"]
     current_response: Annotated[str, "Latest response"]  # Last response
     judge_decision: Annotated[str, "Final judge decision"]  # Last response
     count: Annotated[int, "Length of the current conversation"]  # Conversation length
@@ -33,6 +51,9 @@ class RiskDebateState(TypedDict):
         str, "Neutral Agent's Conversation history"
     ]  # Conversation history
     history: Annotated[str, "Conversation history"]  # Conversation history
+    risk_turns: Annotated[
+        list[RiskTurn], "Structured risk debate turns in chronological order"
+    ]
     latest_speaker: Annotated[str, "Analyst that spoke last"]
     current_aggressive_response: Annotated[
         str, "Latest response by the aggressive analyst"

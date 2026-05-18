@@ -146,6 +146,24 @@ async def analyze_result(task_id: str):
     }
 
 
+@router.get("/api/analyze/{task_id}/usage")
+async def analyze_usage(task_id: str):
+    """Get LLM usage for one analysis task, grouped by model and stage."""
+    task = get_task_manager().get_task(task_id)
+    if not task:
+        raise HTTPException(status_code=404, detail="Task not found")
+
+    result = task.get("result") or {}
+    token_stats = result.get("token_stats") or {}
+    return {
+        "task_id": task["task_id"],
+        "status": task["status"],
+        "ticker": task.get("ticker"),
+        "trade_date": task.get("trade_date"),
+        "token_stats": token_stats,
+    }
+
+
 @router.get("/api/analyze/{task_id}/events")
 async def analyze_events(task_id: str):
     """SSE stream of analysis events."""
@@ -448,6 +466,21 @@ async def prometheus_metrics():
     total_output = sum(s.get("total_output_tokens", 0) for s in token_stats.values())
     lines.append(f"tradingagents_tokens_input_total {total_input}")
     lines.append(f"tradingagents_tokens_output_total {total_output}")
+    for task_id, stats in token_stats.items():
+        for stage, stage_stats in (stats.get("by_stage") or {}).items():
+            safe_stage = str(stage).replace("\\", "\\\\").replace('"', '\\"')
+            lines.append(
+                f'tradingagents_tokens_stage_total{{task_id="{task_id}",stage="{safe_stage}"}} '
+                f'{stage_stats.get("total", 0)}'
+            )
+            lines.append(
+                f'tradingagents_tokens_stage_estimated_total{{task_id="{task_id}",stage="{safe_stage}"}} '
+                f'{stage_stats.get("estimated_total", 0)}'
+            )
+            lines.append(
+                f'tradingagents_llm_stage_calls{{task_id="{task_id}",stage="{safe_stage}"}} '
+                f'{stage_stats.get("calls", 0)}'
+            )
 
     # Active tasks
     from .stream_adapter import _active_tasks, _task_semaphore

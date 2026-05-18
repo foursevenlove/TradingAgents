@@ -17,6 +17,7 @@ from .theme_extractor import ThemeExtractor
 from .theme_tracker import ThemeTracker
 from .stock_screener import StockScreener
 from .industry_mapper import IndustryMapper
+from .analysis_validator import TradingAgentsValidator, normalize_graph_result
 from .daily_recommender import DailyRecommender
 from .weekly_recommender import WeeklyRecommender
 
@@ -29,6 +30,8 @@ __all__ = [
     "ThemeTracker",
     "StockScreener",
     "IndustryMapper",
+    "TradingAgentsValidator",
+    "normalize_graph_result",
     "DailyRecommender",
     "WeeklyRecommender",
 ]

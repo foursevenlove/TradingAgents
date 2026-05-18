@@ -2,7 +2,7 @@
 import asyncio
 import logging
 import uuid
-from datetime import datetime, timezone
+from datetime import datetime, timedelta
 from typing import Optional
 
 from croniter import croniter
@@ -12,8 +12,15 @@ from .holdings_router import get_holdings_manager
 from .holdings_manager import format_holdings_for_prompt
 from .task_manager import get_task_manager
 from .stream_adapter import start_analysis
+from .models import TaskStatus
 
 logger = logging.getLogger("tradingagents.web.scheduler")
+
+TERMINAL_TASK_STATUSES = {
+    TaskStatus.COMPLETED.value,
+    TaskStatus.FAILED.value,
+    TaskStatus.CANCELLED.value,
+}
 
 
 class SchedulerService:
@@ -22,6 +29,7 @@ class SchedulerService:
     def __init__(self, watchlist_manager: WatchlistManager):
         self._wm = watchlist_manager
         self._task: Optional[asyncio.Task] = None
+        self._batch_tasks: dict[str, asyncio.Task] = {}
         self._running = False
 
     async def start(self):
@@ -57,39 +65,37 @@ class SchedulerService:
             return
 
         cron_expr = schedule.get("cron_expression", "0 9 * * 1-5")
+        now = datetime.now().astimezone()
         try:
-            cr = croniter(cron_expr, datetime.now())
-            next_run = cr.get_next(datetime)
+            next_run = croniter(cron_expr, now).get_next(datetime)
             self._wm.update_schedule_next_run(next_run.isoformat())
         except (ValueError, KeyError) as e:
             logger.error(f"Invalid cron expression: {cron_expr} - {e}")
             return
 
-        # Check if it's time to run
-        # Allow execution if:
-        # 1. Within 60s before scheduled time (diff <= 60 and diff > 0)
-        # 2. Within 5min after scheduled time (diff <= 0 and diff > -300) - catch missed triggers
+        # Trigger only after the most recent scheduled time, with a short catch-up
+        # window for scheduler loop delays or brief process stalls.
+        scheduled_at = croniter(cron_expr, now + timedelta(seconds=1)).get_prev(datetime)
+        if scheduled_at.tzinfo is None:
+            scheduled_at = scheduled_at.replace(tzinfo=now.tzinfo)
+        else:
+            scheduled_at = scheduled_at.astimezone(now.tzinfo)
+
+        seconds_since_scheduled = (now - scheduled_at).total_seconds()
+        if seconds_since_scheduled < 0 or seconds_since_scheduled > 300:
+            return
+
         last_run_str = schedule.get("last_run_at")
-        now = datetime.now(timezone.utc)
-
-        # Parse next_run as naive UTC for comparison
-        next_run_utc = next_run.replace(tzinfo=timezone.utc) if next_run.tzinfo is None else next_run.astimezone(timezone.utc)
-        diff = (next_run_utc - now).total_seconds()
-
-        # Skip if too far before scheduled time
-        if diff > 60:
-            return  # Not time yet
-
-        # Skip if too far after scheduled time (missed window)
-        if diff < -300:
-            return  # Too late, wait for next cycle
 
         # Check we haven't already run for this scheduled time
         if last_run_str:
             try:
                 last_run = datetime.fromisoformat(last_run_str.replace("Z", "+00:00"))
-                # If last run was within 5 minutes of the scheduled time, skip
-                if abs((last_run - next_run_utc).total_seconds()) < 300:
+                if last_run.tzinfo is None:
+                    last_run = last_run.replace(tzinfo=now.tzinfo)
+                else:
+                    last_run = last_run.astimezone(now.tzinfo)
+                if scheduled_at <= last_run < next_run:
                     return
             except Exception as exc:
                 logger.warning(
@@ -103,8 +109,8 @@ class SchedulerService:
 
         # Trigger batch analysis
         logger.info(f"Triggering scheduled batch analysis (cron: {cron_expr})")
-        self._wm.update_schedule_last_run()
         await self.run_batch(triggered_by="schedule")
+        self._wm.update_schedule_last_run()
 
     async def run_batch(self, triggered_by: str = "manual") -> str:
         """Run batch analysis on all enabled watchlist stocks. Returns batch_id."""
@@ -116,6 +122,17 @@ class SchedulerService:
         total = len(stocks)
         self._wm.create_batch_run(batch_id, triggered_by, total)
 
+        task = asyncio.create_task(
+            self._execute_batch(batch_id, stocks),
+            name=f"batch_analysis_{batch_id}",
+        )
+        self._batch_tasks[batch_id] = task
+        task.add_done_callback(lambda t, bid=batch_id: self._on_batch_done(bid, t))
+
+        return batch_id
+
+    async def _execute_batch(self, batch_id: str, stocks: list[dict]):
+        """Run a batch in the background and finalize its aggregate status."""
         # Get schedule config
         schedule = self._wm.get_schedule()
         max_concurrency = schedule.get("max_concurrency", 2)
@@ -126,7 +143,9 @@ class SchedulerService:
 
         trade_date = datetime.now().strftime("%Y-%m-%d")
 
-        # Create all tasks first, then run with semaphore
+        # Create tasks in the background and hold the semaphore until each task
+        # reaches a terminal state so schedule max_concurrency controls the
+        # actual number of analyses running for this batch.
         semaphore = asyncio.Semaphore(max_concurrency)
         tm = get_task_manager()
 
@@ -143,60 +162,113 @@ class SchedulerService:
             if ticker in existing_tasks:
                 return existing_tasks[ticker]["task_id"], "skipped"
 
+            task_id = None
             async with semaphore:
-                task_id = tm.create_task(
-                    ticker=ticker,
-                    trade_date=trade_date,
-                    config={
-                        "analysts": analysts,
-                        "max_debate_rounds": max_debate_rounds,
-                        "max_risk_discuss_rounds": max_risk_discuss_rounds,
-                    },
-                )
-                # Link task to batch
-                self._link_task_to_batch(task_id, batch_id)
+                try:
+                    task_id = tm.create_task(
+                        ticker=ticker,
+                        trade_date=trade_date,
+                        config={
+                            "analysts": analysts,
+                            "max_debate_rounds": max_debate_rounds,
+                            "max_risk_discuss_rounds": max_risk_discuss_rounds,
+                        },
+                    )
+                    # Link task to batch
+                    self._link_task_to_batch(task_id, batch_id)
 
-                config_override = {}
-                if max_debate_rounds is not None:
-                    config_override["max_debate_rounds"] = max_debate_rounds
-                if max_risk_discuss_rounds is not None:
-                    config_override["max_risk_discuss_rounds"] = max_risk_discuss_rounds
+                    config_override = {}
+                    if max_debate_rounds is not None:
+                        config_override["max_debate_rounds"] = max_debate_rounds
+                    if max_risk_discuss_rounds is not None:
+                        config_override["max_risk_discuss_rounds"] = max_risk_discuss_rounds
 
-                holding = get_holdings_manager().get_holding_by_ticker(ticker)
-                portfolio_holdings = format_holdings_for_prompt(holding)
+                    holding = get_holdings_manager().get_holding_by_ticker(ticker)
+                    portfolio_holdings = format_holdings_for_prompt(holding)
 
-                await start_analysis(
-                    task_id=task_id,
-                    ticker=ticker,
-                    trade_date=trade_date,
-                    analysts=analysts,
-                    config_override=config_override if config_override else None,
-                    portfolio_holdings=portfolio_holdings,
-                )
+                    await start_analysis(
+                        task_id=task_id,
+                        ticker=ticker,
+                        trade_date=trade_date,
+                        analysts=analysts,
+                        config_override=config_override if config_override else None,
+                        portfolio_holdings=portfolio_holdings,
+                    )
+                    await self._wait_for_task_completion(task_id)
+                    return task_id, "submitted"
+                except Exception as exc:
+                    logger.exception("Failed to submit batch analysis task", extra={"extra_data": {
+                        "batch_id": batch_id,
+                        "ticker": ticker,
+                        "task_id": task_id,
+                    }})
+                    if task_id:
+                        tm.update_status(task_id, TaskStatus.FAILED, error=str(exc))
+                        return task_id, "failed"
+                    return None, "failed"
 
-                # Wait for completion by polling
-                return task_id, "submitted"
-
-        # Fire all tasks (semaphore controls concurrency)
         futures = [_run_one(stock) for stock in stocks]
         results = await asyncio.gather(*futures, return_exceptions=True)
+        submission_failures = sum(
+            1
+            for result in results
+            if isinstance(result, Exception) or result[1] == "failed"
+        )
+        skipped = sum(
+            1
+            for result in results
+            if not isinstance(result, Exception) and result[1] == "skipped"
+        )
 
-        # Wait for all submitted tasks to actually complete, then tally
-        await self._wait_for_batch_completion(batch_id)
+        self._finalize_batch_run(batch_id, skipped=skipped, submission_failures=submission_failures)
 
-        return batch_id
+    async def _wait_for_task_completion(self, task_id: str, poll_interval: float = 5.0):
+        """Poll a task until it reaches a terminal status."""
+        tm = get_task_manager()
+        while True:
+            task = tm.get_task(task_id)
+            if task and task.get("status") in TERMINAL_TASK_STATUSES:
+                return
+            await asyncio.sleep(poll_interval)
+
+    def _finalize_batch_run(self, batch_id: str, skipped: int = 0, submission_failures: int = 0):
+        tasks = self._wm.get_batch_tasks(batch_id)
+        completed_tasks = sum(1 for t in tasks if t["status"] == TaskStatus.COMPLETED.value)
+        failed_tasks = sum(1 for t in tasks if t["status"] in (TaskStatus.FAILED.value, TaskStatus.CANCELLED.value))
+        completed = completed_tasks + skipped
+        failed = failed_tasks + submission_failures
+        self._wm.update_batch_task_count(batch_id, completed, failed)
+
+        if failed == 0:
+            status = "completed"
+        elif completed == 0:
+            status = "failed"
+        else:
+            status = "partial_failure"
+        self._wm.finish_batch_run(batch_id, status)
+
+    def _on_batch_done(self, batch_id: str, task: asyncio.Task):
+        self._batch_tasks.pop(batch_id, None)
+        try:
+            exc = task.exception()
+        except asyncio.CancelledError:
+            self._wm.finish_batch_run(batch_id, "partial_failure", error="批量分析被取消")
+            return
+
+        if exc is not None:
+            logger.exception("Batch analysis failed", exc_info=(type(exc), exc, exc.__traceback__))
+            self._wm.finish_batch_run(batch_id, "failed", error=str(exc))
 
     async def _wait_for_batch_completion(self, batch_id: str, poll_interval: float = 5.0):
         """Poll until all tasks in a batch are done, then update batch status."""
-        from .stream_adapter import get_runner
-
         while True:
             tasks = self._wm.get_batch_tasks(batch_id)
             if not tasks:
+                self._wm.finish_batch_run(batch_id, "completed")
                 break
 
             all_done = all(
-                t["status"] in ("completed", "failed", "cancelled")
+                t["status"] in TERMINAL_TASK_STATUSES
                 for t in tasks
             )
             if all_done:

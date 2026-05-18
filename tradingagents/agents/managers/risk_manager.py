@@ -1,7 +1,3 @@
-import time
-import json
-
-
 def _extract_last_speech(history: str, prefix: str) -> str:
     """从辩论历史中提取某方的最后一条发言。"""
     if not history or not prefix:
@@ -12,17 +8,37 @@ def _extract_last_speech(history: str, prefix: str) -> str:
     return history[last_pos:].strip()
 
 
-def _truncate_for_prompt(text: str, max_chars: int = 800) -> str:
-    """截断文本至指定长度，保留开头核心内容，附加省略提示。"""
-    if not text or len(text) <= max_chars:
-        return text or ""
-    # 在截断点向前找最后一个完整的句子或换行
-    trunc = text[:max_chars]
-    # 优先在换行处截断
-    last_nl = trunc.rfind("\n")
-    if last_nl > max_chars * 0.7:
-        trunc = trunc[:last_nl]
-    return trunc.strip() + "\n\n...（以下内容已在分析师发言中提炼，如需完整细节请参考原始报告）"
+def _format_risk_turns(risk_turns: list[dict]) -> str:
+    """将结构化风控辩论轮次格式化给风控经理引用。"""
+    if not risk_turns:
+        return "无结构化风控辩论记录。"
+
+    formatted = []
+    for turn in risk_turns:
+        speaker = turn.get("label") or {
+            "aggressive": "激进分析师",
+            "conservative": "保守分析师",
+            "neutral": "中立分析师",
+        }.get(turn.get("speaker"), "风控分析师")
+        round_no = turn.get("round", "?")
+        content = turn.get("content", "").strip()
+        formatted.append(f"第{round_no}轮 - {speaker}：{content}")
+    return "\n\n".join(formatted)
+
+
+def _last_risk_turn_content(
+    risk_turns: list[dict], speaker: str, fallback_history: str, prefix: str
+) -> str:
+    """优先从结构化轮次取某方最后发言，兼容旧历史字符串。"""
+    for turn in reversed(risk_turns):
+        if turn.get("speaker") == speaker:
+            label = turn.get("label") or {
+                "aggressive": "激进分析师",
+                "conservative": "保守分析师",
+                "neutral": "中立分析师",
+            }.get(speaker, "风控分析师")
+            return f"第{turn.get('round', '?')}轮 - {label}：{turn.get('content', '').strip()}"
+    return _extract_last_speech(fallback_history, prefix)
 
 
 def _extract_core_table(report_text: str) -> str:
@@ -60,7 +76,6 @@ def create_risk_manager(llm, memory):
         company_name = state["company_of_interest"]
         portfolio_holdings = state.get("portfolio_holdings", "当前无持仓（空仓），这是一个全新的投资决策。")
 
-        history = state["risk_debate_state"]["history"]
         risk_debate_state = state["risk_debate_state"]
         market_research_report = state["market_report"]
         news_report = state["news_report"]
@@ -74,15 +89,29 @@ def create_risk_manager(llm, memory):
         past_memory_str = ""
         for i, rec in enumerate(past_memories, 1):
             past_memory_str += rec["recommendation"] + "\n\n"
+        if not past_memory_str:
+            past_memory_str = "未找到历史反思记录，本次不引用历史经验。"
 
         # 拆分辩论历史为三方独立记录，并提取每方最后一轮发言（最成熟的观点）
         aggressive_history = risk_debate_state.get("aggressive_history", "")
         conservative_history = risk_debate_state.get("conservative_history", "")
         neutral_history = risk_debate_state.get("neutral_history", "")
+        risk_turns = list(risk_debate_state.get("risk_turns", []))
+        risk_debate_transcript = (
+            _format_risk_turns(risk_turns)
+            if risk_turns
+            else risk_debate_state.get("history", "").strip()
+        )
 
-        aggressive_last = _extract_last_speech(aggressive_history, "激进分析师：")
-        conservative_last = _extract_last_speech(conservative_history, "保守分析师：")
-        neutral_last = _extract_last_speech(neutral_history, "中立分析师：")
+        aggressive_last = _last_risk_turn_content(
+            risk_turns, "aggressive", aggressive_history, "激进分析师："
+        )
+        conservative_last = _last_risk_turn_content(
+            risk_turns, "conservative", conservative_history, "保守分析师："
+        )
+        neutral_last = _last_risk_turn_content(
+            risk_turns, "neutral", neutral_history, "中立分析师："
+        )
 
         # 提取四位分析师报告末尾的核心数据表格，替代完整报告以控制prompt长度
         market_table = _extract_core_table(market_research_report)
@@ -100,18 +129,19 @@ def create_risk_manager(llm, memory):
 
 ============================================================
 【角色定位】
-你是A股市场最终风控决策者。你的任务是基于【交易员执行方案】和【三个风控员的风险辩论】两份核心输入，结合【核心数据表】进行交叉验证，做出最终投资决策并输出专业决策报告。
+你是A股市场最终风控决策者，当前评估标的为：{company_name}。你的任务是基于【核心数据表】中的可验证事实，对【交易员执行方案】和【三个风控员的风险辩论】进行证据校验，做出最终投资决策并输出专业决策报告。
 
 你是整个决策链路的最后一环，你的输出就是用户看到的最终报告，必须专业、清晰、可执行。
 
 ============================================================
 【核心决策逻辑（强制执行）】
-1. 以【交易员执行方案】为执行基础，以【三个风控员最后一轮发言】为风险修正依据，以【核心数据表】为事实验证标准
-2. 核心数据表的作用仅限于验证：验证交易员的价位建议是否在数据支撑范围内、验证风控员的担忧是否有事实依据，不做为主要决策输入
+1. 以【核心数据表中的可验证数据】为最高优先级；当交易员方案或风控员观点与数据冲突时，必须以数据为准并降权相关观点
+2. 【交易员执行方案】和【完整结构化风控辩论记录】是候选解释来源，不得绕过数据验证直接采纳
 3. 必须明确说明对交易员计划的态度：完全采纳 / 部分修正 / 推翻重来，并说明理由
-4. 必须权衡激进/保守/中立三派论点，说明采纳了哪些论据、修正了哪些、忽略了哪些及原因
+4. 必须权衡激进/保守/中立三派论点，说明采纳了哪些论据、修正了哪些、忽略了哪些及原因，并评价是否存在选择性引用或逻辑夸大
 5. 风险优先，保护本金，决策必须基于证据，不主观臆测
 6. 重点评估：系统性风险、风险收益比、入场时机、仓位管理、A股交易规则（T+1/涨跌停/政策敏感性）
+7. 必须结合持仓状态输出可执行动作：空仓时只能给出建仓或观望；已持仓时只能给出加仓、减仓、清仓或持有不动；最终的买入/卖出/持有方向必须与该动作一致
 
 ============================================================
 【强制输出结构】
@@ -121,6 +151,7 @@ def create_risk_manager(llm, memory):
 | 决策项目 | 具体内容 |
 |----------|----------|
 | 交易方向 | 买入/卖出/持有（三选一，必须明确） |
+| 本次操作动作 | 空仓时只能写建仓/观望；已持仓时只能写加仓/减仓/清仓/持有不动，并说明与交易方向的对应关系 |
 | 持仓风险评估 | 基于用户当前持仓状态评估：空仓时评估建仓时机风险，已持仓时评估集中度风险、浮盈浮亏状态、加减仓合理性 |
 | 决策置信度 | 高/中/低（基于论据坚实程度和数据支撑充分性判断） |
 | 对交易员计划的态度 | 完全采纳/部分修正/推翻重来（简述核心理由） |
@@ -144,7 +175,7 @@ def create_risk_manager(llm, memory):
 
 三、核心数据验证：
 - 引用下方【核心数据表】中的具体指标数值，说明哪些交易建议有数据支撑、哪些缺乏数据支撑
-- 数据验证仅用于交叉检验，不做为独立决策依据
+- 当风控员观点或交易员建议与核心数据表冲突时，明确指出冲突并说明降权或修正方式
 
 四、风险提示：
 - 列出3个最关键的风险点，每个说明潜在影响和应对思路
@@ -154,7 +185,7 @@ def create_risk_manager(llm, memory):
 
 ============================================================
 【价位与仓位约束】
-- 所有价位建议必须以交易员方案或原始报告中的估值数据、支撑/压力位为参考
+- 所有价位建议必须以交易员方案或核心数据表中的估值数据、支撑/压力位为参考
 - 禁止编造绝对价格数字，统一用"当前价±X%"或"报告提到的XX元附近±X%"表述
 - 仓位建议用百分比或成数（如"五成仓"、"30%-50%仓位"），需说明理由
 
@@ -167,8 +198,8 @@ def create_risk_manager(llm, memory):
 ============================================================
 【信息优先级指引（分析时参考）】
 以下可用资源按优先级排列，决策时应优先基于高优先级信息，低优先级信息仅作背景验证：
-- 最高优先级：交易员执行方案、三个风控员最后一轮发言（决策的核心输入）
-- 高优先级：核心数据表（仅用于验证交易建议是否有数据支撑）
+- 最高优先级：核心数据表中的可验证数据
+- 高优先级：交易员执行方案、完整结构化风控辩论记录、三个风控员最后一轮发言（候选论据，必须经过数据验证）
 - 高优先级：用户持仓信息（风险评估必须考虑持仓状态）
 - 辅助参考：过去的反思和经验教训
 
@@ -193,6 +224,10 @@ def create_risk_manager(llm, memory):
 
 ========== [交易员执行方案] ==========
 {trader_plan}
+========== [内容结束] ==========
+
+========== [完整结构化风控辩论记录] ==========
+{risk_debate_transcript}
 ========== [内容结束] ==========
 
 ========== [激进分析师 · 最后一轮发言] ==========
@@ -231,6 +266,7 @@ def create_risk_manager(llm, memory):
             "aggressive_history": risk_debate_state["aggressive_history"],
             "conservative_history": risk_debate_state["conservative_history"],
             "neutral_history": risk_debate_state["neutral_history"],
+            "risk_turns": risk_debate_state.get("risk_turns", []),
             "latest_speaker": "Judge",
             "current_aggressive_response": risk_debate_state["current_aggressive_response"],
             "current_conservative_response": risk_debate_state["current_conservative_response"],

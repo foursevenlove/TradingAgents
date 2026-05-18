@@ -1,12 +1,13 @@
 # TradingAgents/graph/setup.py
 
-from typing import Dict, Any
+from typing import Dict, Any, Optional, List
 from langchain_openai import ChatOpenAI
 from langgraph.graph import END, StateGraph, START
 from langgraph.prebuilt import ToolNode
 
 from tradingagents.agents import *
 from tradingagents.agents.utils.agent_states import AgentState
+from tradingagents.utils.token_tracker import token_tracking_context
 
 from .conditional_logic import ConditionalLogic
 
@@ -25,6 +26,7 @@ class GraphSetup:
         invest_judge_memory,
         risk_manager_memory,
         conditional_logic: ConditionalLogic,
+        callbacks: Optional[List] = None,
     ):
         """Initialize with required components."""
         self.quick_thinking_llm = quick_thinking_llm
@@ -36,6 +38,17 @@ class GraphSetup:
         self.invest_judge_memory = invest_judge_memory
         self.risk_manager_memory = risk_manager_memory
         self.conditional_logic = conditional_logic
+        self.callbacks = callbacks or []
+
+    def _with_token_stage(self, stage: str, node):
+        """Wrap a graph node so nested LLM calls are attributed to this stage."""
+        def wrapped(state):
+            with token_tracking_context(stage, self.callbacks):
+                if hasattr(node, "invoke"):
+                    return node.invoke(state)
+                return node(state)
+
+        return wrapped
 
     def setup_graph(
         self, selected_analysts=["market", "social", "news", "fundamentals"]
@@ -110,21 +123,28 @@ class GraphSetup:
 
         # Add analyst nodes to the graph
         for analyst_type, node in analyst_nodes.items():
-            workflow.add_node(f"{analyst_type.capitalize()} Analyst", node)
+            analyst_stage = f"{analyst_type.capitalize()} Analyst"
+            workflow.add_node(
+                analyst_stage,
+                self._with_token_stage(analyst_stage, node),
+            )
             workflow.add_node(
                 f"Msg Clear {analyst_type.capitalize()}", delete_nodes[analyst_type]
             )
-            workflow.add_node(f"tools_{analyst_type}", tool_nodes[analyst_type])
+            workflow.add_node(
+                f"tools_{analyst_type}",
+                self._with_token_stage(f"{analyst_type.capitalize()} Tools", tool_nodes[analyst_type]),
+            )
 
         # Add other nodes
-        workflow.add_node("Bull Researcher", bull_researcher_node)
-        workflow.add_node("Bear Researcher", bear_researcher_node)
-        workflow.add_node("Research Manager", research_manager_node)
-        workflow.add_node("Trader", trader_node)
-        workflow.add_node("Aggressive Analyst", aggressive_analyst)
-        workflow.add_node("Neutral Analyst", neutral_analyst)
-        workflow.add_node("Conservative Analyst", conservative_analyst)
-        workflow.add_node("Risk Judge", risk_manager_node)
+        workflow.add_node("Bull Researcher", self._with_token_stage("Bull Researcher", bull_researcher_node))
+        workflow.add_node("Bear Researcher", self._with_token_stage("Bear Researcher", bear_researcher_node))
+        workflow.add_node("Research Manager", self._with_token_stage("Research Manager", research_manager_node))
+        workflow.add_node("Trader", self._with_token_stage("Trader", trader_node))
+        workflow.add_node("Aggressive Analyst", self._with_token_stage("Aggressive Analyst", aggressive_analyst))
+        workflow.add_node("Neutral Analyst", self._with_token_stage("Neutral Analyst", neutral_analyst))
+        workflow.add_node("Conservative Analyst", self._with_token_stage("Conservative Analyst", conservative_analyst))
+        workflow.add_node("Risk Judge", self._with_token_stage("Risk Judge", risk_manager_node))
 
         # Define edges - SEQUENTIAL execution (stable)
         # Start with the first analyst

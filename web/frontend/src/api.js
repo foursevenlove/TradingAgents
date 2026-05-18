@@ -142,6 +142,7 @@ export const api = {
     }
   },
   getResult: (taskId) => get(`/api/analyze/${taskId}/result`),
+  getUsage: (taskId) => get(`/api/analyze/${taskId}/usage`),
   getHistory: (limit = 50, offset = 0) => get(`/api/history?limit=${limit}&offset=${offset}`),
   getHistoryDetail: (taskId) => get(`/api/history/${taskId}`),
   getConfig: () => get('/api/config'),

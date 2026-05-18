@@ -391,6 +391,26 @@ def run_dataflow_unit_tests(recorder: CheckRecorder) -> None:
         )
         recorder.require(len(capped) == 10, "policy LLM selection is capped at 10", str(len(capped)))
 
+        policy_candidates = pd.DataFrame(
+            [{"title": f"无关新闻{i}", "content": "文化体育内容"} for i in range(25)] +
+            [{"title": "金融政策部署", "content": "国务院推动金融高质量发展"}]
+        )
+        reduced = tushare_news._prefilter_policy_candidates(
+            policy_candidates,
+            {"company_name": "浦发银行", "level_1": "银行", "level_2": "股份制银行"},
+            max_candidates=5,
+        )
+        recorder.require(len(reduced) <= 5, "policy prefilter caps candidates", str(len(reduced)))
+        recorder.require("金融政策部署" in reduced["title"].tolist(), "policy prefilter keeps relevant policy item")
+
+        long_df = pd.DataFrame([{"title": "长正文新闻", "content": "正文" * 1000}])
+        bounded = tushare_news._format_bounded_news_csv(
+            long_df,
+            "# bounded",
+            {"content": 20},
+        )
+        recorder.require("正文" * 20 not in bounded, "bounded news csv truncates long content")
+
         original_get_pro_api = tushare_news._get_pro_api
         original_get_stock_name = tushare_news._get_stock_name_from_code
         original_segmented_fetch_major = tushare_news._segmented_fetch_major

@@ -15,6 +15,7 @@ import pandas as pd
 from tradingagents.recommendation.theme_extractor import ThemeExtractor
 from tradingagents.recommendation.stock_screener import StockScreener
 from tradingagents.recommendation.industry_mapper import IndustryMapper
+from tradingagents.recommendation.analysis_validator import TradingAgentsValidator
 from tradingagents.default_config import DEFAULT_CONFIG
 
 
@@ -44,42 +45,12 @@ class WeeklyRecommender:
             Dict with analysis results: decision, confidence, full report
         """
         try:
-            from tradingagents.graph.trading_graph import TradingAgentsGraph
-
-            # Create graph with all analysts
-            graph = TradingAgentsGraph(
+            validator = TradingAgentsValidator(
                 selected_analysts=["market", "social", "news", "fundamentals"],
-                debug=False,
                 config=DEFAULT_CONFIG,
+                debug=False,
             )
-
-            # Run analysis
-            state = graph.propagate(stock_code, trade_date)
-
-            # Extract decision signal
-            decision = state.get("final_decision", "hold")
-            confidence = state.get("final_decision_confidence", 0.5)
-
-            # Get all analyst reports
-            reports = {}
-            for key in ["market_analyst_report", "news_analyst_report",
-                       "social_analyst_report", "fundamentals_analyst_report"]:
-                if key in state:
-                    reports[key] = state[key][:1000]  # Limit length
-
-            # Risk assessment
-            risk_summary = ""
-            if "risk_manager_decision" in state:
-                risk_summary = state["risk_manager_decision"][:500]
-
-            return {
-                "code": stock_code,
-                "decision": decision,
-                "confidence": confidence,
-                "reports": reports,
-                "risk_summary": risk_summary,
-                "reason": f"完整分析: {decision} (置信度{confidence:.0%})",
-            }
+            return validator.validate(stock_code, trade_date)
 
         except Exception as e:
             logger.error(
@@ -103,6 +74,7 @@ class WeeklyRecommender:
         week_start: str,
         days: int = 7,
         max_articles: int = 3000,  # 每周推荐获取更多新闻
+        as_of_date: str = None,
     ) -> List[Dict]:
         """Aggregate news from multiple days in a week.
 
@@ -119,6 +91,7 @@ class WeeklyRecommender:
             news = self.theme_extractor.get_news_for_recommendation(
                 look_back_days=days,
                 max_articles=max_articles,
+                as_of_date=as_of_date,
             )
             return news
         except Exception as exc:
@@ -139,6 +112,7 @@ class WeeklyRecommender:
         week_start: str,
         max_themes: int = 10,
         max_news_for_llm: int = 2000,  # 每周推荐用更多新闻
+        as_of_date: str = None,
     ) -> List[Dict]:
         """Extract themes from weekly aggregated news.
 
@@ -150,14 +124,10 @@ class WeeklyRecommender:
         Returns:
             List of theme dicts
         """
-        news = self.get_weekly_news(week_start)
-        if not news:
-            return []
-
-        themes = self.theme_extractor.extract_themes(
-            news,
+        themes = self.theme_extractor.extract_themes_from_cache(
+            look_back_days=7,
             max_themes=max_themes,
-            max_news_for_llm=max_news_for_llm,
+            as_of_date=as_of_date,
         )
 
         # Add week context to each theme
@@ -206,7 +176,11 @@ class WeeklyRecommender:
                     timedelta(days=4)).strftime("%Y-%m-%d")
 
         # 1. Extract themes from weekly news
-        themes = self.extract_weekly_themes(week_start, max_themes)
+        themes = self.extract_weekly_themes(
+            week_start,
+            max_themes,
+            as_of_date=week_end,
+        )
 
         # 2. Screen stocks with same criteria as daily (more flexible)
         screened_stocks = self.stock_screener.screen(

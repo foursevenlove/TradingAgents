@@ -19,7 +19,7 @@ from tradingagents.utils.token_tracker import get_token_tracker, remove_token_tr
 from .models import SSEEvent, EventType, TaskStatus
 from .task_manager import get_task_manager
 from .config import WEB_CONFIG
-from .exceptions import LLMError, LLMTimeoutError, DataSourceError, classify_exception
+from .exceptions import LLMError, LLMTimeoutError, LLMAccountError, DataSourceError, classify_exception
 from .logging_config import get_server_logger, log_exception, log_analysis_event
 
 
@@ -297,16 +297,42 @@ class AnalysisRunner:
                 # Bridge: background thread -> asyncio.Queue
                 loop = asyncio.get_event_loop()
                 async_queue: asyncio.Queue = asyncio.Queue()
+                attempt_cancelled = threading.Event()
+
+                def is_attempt_cancelled() -> bool:
+                    return self._cancelled or attempt_cancelled.is_set()
+
+                def queue_threadsafe(item_type: str, item_data: Any = None):
+                    try:
+                        loop.call_soon_threadsafe(async_queue.put_nowait, (item_type, item_data))
+                    except RuntimeError:
+                        # The event loop can already be gone if a stale graph
+                        # thread returns after the request was timed out.
+                        pass
 
                 def run_graph_sync():
                     try:
                         for chunk in graph.graph.stream(init_state, stream_mode="updates", config=stream_config):
-                            if self._cancelled:
-                                loop.call_soon_threadsafe(async_queue.put_nowait, ("cancelled", None))
+                            if is_attempt_cancelled():
+                                if self._cancelled:
+                                    queue_threadsafe("cancelled")
                                 return
-                            loop.call_soon_threadsafe(async_queue.put_nowait, ("chunk", chunk))
-                        loop.call_soon_threadsafe(async_queue.put_nowait, ("done", None))
+                            queue_threadsafe("chunk", chunk)
+                        if not is_attempt_cancelled():
+                            queue_threadsafe("done")
                     except Exception as e:
+                        if is_attempt_cancelled():
+                            log_analysis_event(
+                                "graph_stale_error_suppressed",
+                                "Graph execution error ignored after attempt cancellation",
+                                logging.INFO,
+                                task_id=self.task_id,
+                                ticker=self.ticker,
+                                attempt=attempt + 1,
+                                error_type=type(e).__name__,
+                                error=str(e),
+                            )
+                            return
                         _logger.error(
                             f"Graph execution error: {type(e).__name__}: {str(e)}",
                             exc_info=(type(e), e, e.__traceback__),
@@ -318,11 +344,11 @@ class AnalysisRunner:
                             }},
                         )
                         classified = classify_exception(e)
-                        loop.call_soon_threadsafe(async_queue.put_nowait, ("error", {
+                        queue_threadsafe("error", {
                             "type": classified.error_code,
                             "message": classified.user_message,
                             "detail": str(e),
-                        }))
+                        })
 
                 thread = threading.Thread(target=run_graph_sync, daemon=True)
                 thread.start()
@@ -332,6 +358,7 @@ class AnalysisRunner:
                     try:
                         item_type, item_data = await asyncio.wait_for(async_queue.get(), timeout=SILENCE_TIMEOUT)
                     except asyncio.TimeoutError:
+                        attempt_cancelled.set()
                         log_analysis_event(
                             "silence_timeout",
                             "Analysis task timed out waiting for graph events",
@@ -341,15 +368,8 @@ class AnalysisRunner:
                             attempt=attempt + 1,
                             silence_timeout_sec=SILENCE_TIMEOUT,
                         )
-                        if attempt < MAX_RETRIES - 1:
-                            await self._emit(EventType.FAILED, {
-                                "error": f"任务超时，正在重试 ({attempt + 2}/{MAX_RETRIES})...",
-                                "is_retry": True,
-                            })
-                            await asyncio.sleep(RETRY_DELAY)
-                            continue
-                        else:
-                            raise LLMTimeoutError(detail=f"任务超时：{SILENCE_TIMEOUT // 60} 分钟内无响应")
+                        thread.join(timeout=1.0)
+                        raise LLMTimeoutError(detail=f"任务超时：{SILENCE_TIMEOUT // 60} 分钟内无响应")
 
                     if item_type == "chunk":
                         await self._process_chunk(item_data)
@@ -386,15 +406,15 @@ class AnalysisRunner:
                             detail=error_info["detail"],
                         )
 
-                        if error_info["type"] in ["LLM_ERROR", "LLM_TIMEOUT"] and attempt < MAX_RETRIES - 1:
-                            await self._emit(EventType.FAILED, {
-                                "error": f"{error_info['message']}，正在重试 ({attempt + 2}/{MAX_RETRIES})...",
-                                "is_retry": True,
-                            })
-                            await asyncio.sleep(RETRY_DELAY)
-                            continue
-                        else:
-                            raise Exception(error_info["detail"])
+                        if error_info["type"] == "LLM_TIMEOUT":
+                            raise LLMTimeoutError(detail=error_info["detail"])
+                        if error_info["type"] == "LLM_ERROR":
+                            raise LLMError(detail=error_info["detail"])
+                        if error_info["type"] == "LLM_ACCOUNT_ERROR":
+                            raise LLMAccountError(detail=error_info["detail"])
+                        if error_info["type"] == "DATA_SOURCE_ERROR":
+                            raise DataSourceError(detail=error_info["detail"])
+                        raise Exception(error_info["detail"])
 
                 thread.join(timeout=30.0)
 
@@ -424,14 +444,13 @@ class AnalysisRunner:
                             "signal": signal,
                         })
 
-                    await self._emit(EventType.COMPLETED, {"task_id": self.task_id})
-                    get_task_manager().update_status(self.task_id, TaskStatus.COMPLETED)
-
                     # Get token stats before cleanup
                     token_stats = token_tracker.get_stats()
                     result = self._build_result(final_state)
                     result["token_stats"] = token_stats
                     get_task_manager().set_result(self.task_id, result, signal)
+                    get_task_manager().update_status(self.task_id, TaskStatus.COMPLETED)
+                    await self._emit(EventType.COMPLETED, {"task_id": self.task_id})
 
                     log_analysis_event(
                         "task_completed",
@@ -478,7 +497,7 @@ class AnalysisRunner:
                     attempt=attempt + 1,
                     error=str(e),
                 )
-                if attempt < MAX_RETRIES - 1:
+                if e.error_code == "LLM_ERROR" and attempt < MAX_RETRIES - 1:
                     await self._emit(EventType.FAILED, {
                         "error": f"{e.user_message}，正在重试 ({attempt + 2}/{MAX_RETRIES})...",
                         "is_retry": True,
@@ -606,13 +625,13 @@ class AnalysisRunner:
             if "final_trade_decision" in node_data and node_data["final_trade_decision"]:
                 if not self._final_decision_sent:
                     self._final_decision_sent = True
-                    if "Trader" not in self._seen_agents:
-                        self._seen_agents.add("Trader")
-                        await self._emit(EventType.AGENT_START, {"agent_name": "Trader"})
+                    if "Risk Judge" not in self._seen_agents:
+                        self._seen_agents.add("Risk Judge")
+                        await self._emit(EventType.AGENT_START, {"agent_name": "Risk Judge"})
                     await self._emit(EventType.FINAL_DECISION, {
                         "content": node_data["final_trade_decision"],
                     })
-                    await self._emit(EventType.AGENT_END, {"agent_name": "Trader"})
+                    await self._emit(EventType.AGENT_END, {"agent_name": "Risk Judge"})
 
             for report_key in ["market_report", "sentiment_report", "news_report", "fundamentals_report"]:
                 if report_key in node_data and node_data[report_key]:
@@ -683,30 +702,33 @@ class AnalysisRunner:
             return
         self._last_debate_count = count
 
-        current = debate.get("current_response", "")
-        if current.startswith("看涨"):
+        latest_speaker = debate.get("latest_speaker", "")
+        debate_turns = debate.get("debate_turns", []) or []
+        latest_turn = debate_turns[-1] if debate_turns else {}
+
+        if latest_speaker == "bull":
             agent_name = "Bull Researcher"
             if agent_name not in self._seen_agents:
                 self._seen_agents.add(agent_name)
                 await self._emit(EventType.AGENT_START, {"agent_name": agent_name})
-            content = self._extract_last_line(debate.get("bull_history", ""))
+            content = latest_turn.get("content") or self._extract_last_line(debate.get("bull_history", ""))
             await self._emit(EventType.DEBATE_SPEECH, {
                 "side": "bull",
                 "speaker": "Bull Researcher",
                 "content": content,
-                "round": (count + 1) // 2,
+                "round": latest_turn.get("round") or (count + 1) // 2,
             })
-        elif current.startswith("看跌"):
+        elif latest_speaker == "bear":
             agent_name = "Bear Researcher"
             if agent_name not in self._seen_agents:
                 self._seen_agents.add(agent_name)
                 await self._emit(EventType.AGENT_START, {"agent_name": agent_name})
-            content = self._extract_last_line(debate.get("bear_history", ""))
+            content = latest_turn.get("content") or self._extract_last_line(debate.get("bear_history", ""))
             await self._emit(EventType.DEBATE_SPEECH, {
                 "side": "bear",
                 "speaker": "Bear Researcher",
                 "content": content,
-                "round": count // 2,
+                "round": latest_turn.get("round") or count // 2,
             })
 
     async def _handle_risk_debate(self, debate: Dict[str, Any]):
@@ -731,14 +753,19 @@ class AnalysisRunner:
         self._last_risk_count = count
 
         speaker = debate.get("latest_speaker", "")
+        risk_turns = debate.get("risk_turns", []) or []
+        latest_turn = risk_turns[-1] if risk_turns else {}
         if speaker.startswith("Aggressive"):
-            side, content = "aggressive", debate.get("current_aggressive_response", "")
+            side = "aggressive"
+            content = latest_turn.get("content") or debate.get("current_aggressive_response", "")
             agent_name = "Aggressive Analyst"
         elif speaker.startswith("Conservative"):
-            side, content = "conservative", debate.get("current_conservative_response", "")
+            side = "conservative"
+            content = latest_turn.get("content") or debate.get("current_conservative_response", "")
             agent_name = "Conservative Analyst"
         elif speaker.startswith("Neutral"):
-            side, content = "neutral", debate.get("current_neutral_response", "")
+            side = "neutral"
+            content = latest_turn.get("content") or debate.get("current_neutral_response", "")
             agent_name = "Neutral Analyst"
         else:
             return
@@ -751,7 +778,7 @@ class AnalysisRunner:
             "side": side,
             "speaker": speaker,
             "content": content,
-            "round": (count - 1) // 3 + 1,
+            "round": latest_turn.get("round") or (count - 1) // 3 + 1,
         })
 
     def _extract_last_line(self, text: str) -> str:
@@ -803,6 +830,7 @@ class AnalysisRunner:
             "investment_debate_state": {
                 "bull_history": state.get("investment_debate_state", {}).get("bull_history", ""),
                 "bear_history": state.get("investment_debate_state", {}).get("bear_history", ""),
+                "debate_turns": state.get("investment_debate_state", {}).get("debate_turns", []),
                 "judge_decision": state.get("investment_debate_state", {}).get("judge_decision", ""),
             },
             "trader_investment_plan": state.get("trader_investment_plan", ""),
@@ -810,6 +838,7 @@ class AnalysisRunner:
                 "aggressive_history": state.get("risk_debate_state", {}).get("aggressive_history", ""),
                 "conservative_history": state.get("risk_debate_state", {}).get("conservative_history", ""),
                 "neutral_history": state.get("risk_debate_state", {}).get("neutral_history", ""),
+                "risk_turns": state.get("risk_debate_state", {}).get("risk_turns", []),
                 "judge_decision": state.get("risk_debate_state", {}).get("judge_decision", ""),
             },
             "final_trade_decision": state.get("final_trade_decision", ""),

@@ -29,6 +29,44 @@
       <!-- Factor Score -->
       <FactorScore :result="result" />
 
+      <!-- LLM Usage -->
+      <div class="card" v-if="usageRows.length">
+        <div class="flex items-center justify-between mb-3">
+          <h3 class="text-sm font-semibold text-gray-700">LLM 消耗</h3>
+          <div class="text-xs text-gray-500">
+            调用 {{ usageSummary.calls }} 次 · 实际 {{ formatNumber(usageSummary.totalTokens) }} tokens · 估算 {{ formatNumber(usageSummary.estimatedTokens) }} tokens
+          </div>
+        </div>
+        <div class="overflow-x-auto">
+          <table class="min-w-full text-sm">
+            <thead>
+              <tr class="text-left text-xs text-gray-500 border-b">
+                <th class="py-2 pr-4 font-medium">阶段</th>
+                <th class="py-2 pr-4 font-medium">调用</th>
+                <th class="py-2 pr-4 font-medium">输入</th>
+                <th class="py-2 pr-4 font-medium">输出</th>
+                <th class="py-2 pr-4 font-medium">实际合计</th>
+                <th class="py-2 pr-4 font-medium">估算合计</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr v-for="row in usageRows" :key="row.stage" class="border-b last:border-0">
+                <td class="py-2 pr-4 text-gray-700">{{ displayStage(row.stage) }}</td>
+                <td class="py-2 pr-4 text-gray-600">{{ row.calls }}</td>
+                <td class="py-2 pr-4 text-gray-600">{{ formatNumber(row.input) }}</td>
+                <td class="py-2 pr-4 text-gray-600">{{ formatNumber(row.output) }}</td>
+                <td class="py-2 pr-4 text-gray-700">{{ formatNumber(row.total) }}</td>
+                <td class="py-2 pr-4 text-gray-700">{{ formatNumber(row.estimated_total) }}</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+        <p class="text-xs text-gray-500 mt-3">
+          实际 token 取自模型返回的 usage；模型未返回 usage 时，估算值按提示和回复字符数近似计算。
+          历史任务如果没有阶段明细，会显示模型级总计；新任务会显示每个分析师/阶段。
+        </p>
+      </div>
+
       <!-- Reports -->
       <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
         <div class="card" v-if="result.market_report">
@@ -84,7 +122,7 @@
 </template>
 
 <script setup>
-import { ref, onMounted } from 'vue'
+import { ref, onMounted, computed } from 'vue'
 import { useRouter } from 'vue-router'
 import { marked } from 'marked'
 import DecisionCard from '../components/DecisionCard.vue'
@@ -110,6 +148,78 @@ const ticker = ref('')
 const tradeDate = ref('')
 const loading = ref(true)
 const error = ref('')
+const usage = ref(null)
+
+const usageRows = computed(() => {
+  const stats = usage.value || result.value?.token_stats || {}
+  const byStage = stats.by_stage || {}
+  const stageRows = Object.entries(byStage)
+    .map(([stage, stats]) => ({ stage, ...stats }))
+    .sort((a, b) => (b.estimated_total || b.total || 0) - (a.estimated_total || a.total || 0))
+
+  if (stageRows.length) return stageRows
+
+  const modelRows = Object.entries(stats.models || {}).map(([model, modelStats]) => ({
+    stage: `旧任务总计 · ${model}`,
+    calls: modelStats.calls || stats.call_count?.[model] || 0,
+    input: modelStats.input || 0,
+    output: modelStats.output || 0,
+    total: modelStats.total || ((modelStats.input || 0) + (modelStats.output || 0)),
+    estimated_total: modelStats.estimated_total || stats.total_estimated_tokens || ((modelStats.input || 0) + (modelStats.output || 0)),
+  }))
+
+  if (modelRows.length) return modelRows
+
+  if (stats.total_tokens || stats.total_estimated_tokens) {
+    return [{
+      stage: '旧任务总计',
+      calls: Object.values(stats.call_count || {}).reduce((sum, count) => sum + Number(count || 0), 0),
+      input: stats.total_input_tokens || 0,
+      output: stats.total_output_tokens || 0,
+      total: stats.total_tokens || 0,
+      estimated_total: stats.total_estimated_tokens || stats.total_tokens || 0,
+    }]
+  }
+
+  return []
+})
+
+const usageSummary = computed(() => {
+  const stats = usage.value || result.value?.token_stats || {}
+  const rows = usageRows.value
+  return {
+    calls: rows.reduce((sum, row) => sum + (row.calls || 0), 0),
+    totalTokens: stats.total_tokens || rows.reduce((sum, row) => sum + (row.total || 0), 0),
+    estimatedTokens: stats.total_estimated_tokens || rows.reduce((sum, row) => sum + (row.estimated_total || 0), 0),
+  }
+})
+
+function formatNumber(value) {
+  return Number(value || 0).toLocaleString()
+}
+
+function displayStage(stage) {
+  const names = {
+    'Market Analyst': '市场分析师',
+    'Market Tools': '市场工具',
+    'Social Analyst': '情绪分析师',
+    'Social Tools': '情绪工具',
+    'News Analyst': '新闻分析师',
+    'News Tools': '新闻工具',
+    'Fundamentals Analyst': '基本面分析师',
+    'Fundamentals Tools': '基本面工具',
+    'Bull Researcher': '多方研究员',
+    'Bear Researcher': '空方研究员',
+    'Research Manager': '研究经理',
+    Trader: '交易员',
+    'Aggressive Analyst': '激进风控',
+    'Neutral Analyst': '中性风控',
+    'Conservative Analyst': '保守风控',
+    'Risk Judge': '风控经理',
+    unattributed: '未归因',
+  }
+  return names[stage] || stage
+}
 
 onMounted(async () => {
   try {
@@ -134,6 +244,13 @@ onMounted(async () => {
       const detail = await api.getHistoryDetail(props.taskId)
       result.value = detail.result
       signal.value = detail.signal || ''
+    }
+
+    try {
+      const usageRes = await api.getUsage(props.taskId)
+      usage.value = usageRes.token_stats || null
+    } catch {
+      usage.value = result.value?.token_stats || null
     }
 
     if (!result.value) {

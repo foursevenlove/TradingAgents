@@ -65,6 +65,18 @@ def _get_filter_llm():
     return _FILTER_LLM
 
 
+def _invoke_filter_llm(llm, prompt: str, stage_detail: str):
+    """Invoke data-layer LLM with the active analysis token tracker when present."""
+    try:
+        from tradingagents.utils.token_tracker import get_current_llm_config
+        config = get_current_llm_config({"stage_detail": stage_detail})
+        if config:
+            return llm.invoke(prompt, config=config)
+    except Exception:
+        pass
+    return llm.invoke(prompt)
+
+
 # 需要分段调用的数据源（单次1500条上限，测试显示3天内触顶的源都需要分段）
 SEGMENTED_SOURCES = {
     "company": ["sina", "eastmoney", "10jqka", "cls", "jinrongjie"],
@@ -78,6 +90,50 @@ SEGMENT_HOURS = 6
 INDUSTRY_SEGMENT_HOURS = 12
 
 NEW_DAYS = 3
+
+# News API payloads can contain full wire-story bodies. Tool outputs are fed
+# back into the next LLM call as ToolMessages, so keep them summary-sized.
+NEWS_CONTENT_CHAR_LIMIT = 500
+NEWS_SUMMARY_CHAR_LIMIT = 260
+NEWS_POLICY_CANDIDATE_LIMIT = 20
+NEWS_TOOL_OUTPUT_CHAR_LIMIT = 60000
+
+
+def _truncate_text(text: Any, max_chars: int) -> str:
+    clean = _strip_html(str(text)) if text is not None else ""
+    if len(clean) <= max_chars:
+        return clean
+    return clean[:max_chars].rstrip() + "...[truncated]"
+
+
+def _format_bounded_news_csv(
+    df: pd.DataFrame,
+    header_info: Optional[str],
+    text_limits: Dict[str, int],
+    max_chars: int = NEWS_TOOL_OUTPUT_CHAR_LIMIT,
+) -> str:
+    """Format news data for LLM tool consumption with bounded text columns."""
+    if df.empty:
+        return _format_to_csv(df, header_info)
+
+    bounded_df = df.copy()
+    for column, limit in text_limits.items():
+        if column in bounded_df.columns:
+            bounded_df[column] = bounded_df[column].apply(lambda value: _truncate_text(value, limit))
+
+    output = _format_to_csv(bounded_df, header_info)
+    if len(output) <= max_chars:
+        return output
+
+    reduced_df = bounded_df
+    while len(reduced_df) > 1 and len(output) > max_chars:
+        reduced_df = reduced_df.head(max(1, len(reduced_df) // 2))
+        note = f"# NOTE: Output truncated to {len(reduced_df)} rows to keep LLM input bounded.\n"
+        output = _format_to_csv(reduced_df, (header_info or "") + note)
+
+    if len(output) > max_chars:
+        return output[:max_chars].rstrip() + "\n# NOTE: Output hard-truncated to keep LLM input bounded."
+    return output
 
 COMPANY_NEWS_SOURCES = ['eastmoney', 'sina', '10jqka', 'cls', 'yicai', 'jinrongjie']
 INDUSTRY_FAST_NEWS_SOURCES = ['eastmoney', 'sina', '10jqka', 'cls', 'yicai', 'jinrongjie']
@@ -507,7 +563,7 @@ def _llm_select_relevant_news(
 """
 
     try:
-        result = llm.invoke(prompt)
+        result = _invoke_filter_llm(llm, prompt, "company_news_semantic_select")
         content = result.content if hasattr(result, 'content') else str(result)
         # Parse numbers from response
         numbers = re.findall(r'\d+', content)
@@ -565,7 +621,7 @@ def _llm_expand_keywords(
 """
 
     try:
-        result = llm.invoke(prompt)
+        result = _invoke_filter_llm(llm, prompt, "industry_keyword_expand")
         raw = result.content if hasattr(result, 'content') else str(result)
         keywords = []
         for line in raw.split('\n'):
@@ -637,7 +693,7 @@ def _select_single_batch(
 """
 
     try:
-        result = llm.invoke(prompt)
+        result = _invoke_filter_llm(llm, prompt, "industry_news_select")
         raw = result.content if hasattr(result, 'content') else str(result)
         numbers = re.findall(r'\d+', raw)
         selected = []
@@ -764,7 +820,7 @@ def _llm_summarize_news(
 """
 
     try:
-        result = llm.invoke(prompt)
+        result = _invoke_filter_llm(llm, prompt, "industry_news_summarize")
         raw = result.content if hasattr(result, 'content') else str(result)
 
         # Parse summaries by index
@@ -788,11 +844,77 @@ def _llm_summarize_news(
         return df
 
 
+def _prefilter_policy_candidates(
+    cctv_df: pd.DataFrame,
+    industry_info: Dict[str, Any],
+    max_candidates: int = NEWS_POLICY_CANDIDATE_LIMIT,
+) -> pd.DataFrame:
+    """Reduce CCTV policy candidates before LLM filtering without dropping broad policy signals."""
+    if cctv_df.empty:
+        return cctv_df
+
+    company_name = str(industry_info.get('company_name', '') or '')
+    industry_terms = [
+        str(industry_info.get('level_1', '') or ''),
+        str(industry_info.get('level_2', '') or ''),
+    ]
+    industry_terms = [term for term in industry_terms if term and term != '未知']
+
+    policy_terms = [
+        "政策", "会议", "部署", "改革", "监管", "支持", "推动", "促进",
+        "发展", "创新", "产业", "经济", "金融", "资本市场", "稳增长",
+        "高质量发展", "扩大内需", "投资", "科技", "制造", "能源",
+    ]
+    broad_macro_terms = [
+        "国务院", "中央", "全国人大", "发改委", "工信部", "财政部",
+        "人民银行", "证监会", "金融监管", "货币政策", "财政政策",
+    ]
+
+    scored = []
+    for idx, row in cctv_df.iterrows():
+        text = (
+            str(row.get('title', '')) + " " +
+            _strip_html(str(row.get('content', '')))
+        )
+        score = 0
+        matched_terms = 0
+
+        if company_name and company_name in text:
+            score += 6
+            matched_terms += 1
+
+        for term in industry_terms:
+            if term in text:
+                score += 5
+                matched_terms += 1
+
+        for term in policy_terms:
+            if term in text:
+                score += 2
+                matched_terms += 1
+
+        for term in broad_macro_terms:
+            if term in text:
+                score += 1
+                matched_terms += 1
+
+        if score > 0:
+            scored.append((idx, score, matched_terms))
+
+    if not scored:
+        return cctv_df.head(max_candidates).copy()
+
+    scored.sort(key=lambda item: (item[1], item[2]), reverse=True)
+    selected_indices = [idx for idx, _score, _matched in scored[:max_candidates]]
+    return cctv_df.loc[selected_indices].copy()
+
+
 def _llm_filter_policy_news(
     cctv_df: pd.DataFrame,
     ticker: str,
     industry_info: Dict[str, Any],
     max_items: int = 10,
+    max_candidates: int = NEWS_POLICY_CANDIDATE_LIMIT,
 ) -> pd.DataFrame:
     """Use LLM to filter CCTV news for policy items relevant to the stock's industry.
 
@@ -802,9 +924,11 @@ def _llm_filter_policy_news(
     if cctv_df.empty:
         return cctv_df
 
+    candidate_df = _prefilter_policy_candidates(cctv_df, industry_info, max_candidates)
+
     llm = _get_filter_llm()
     if llm is None:
-        return cctv_df.head(max_items).copy()
+        return candidate_df.head(max_items).copy()
 
     company_name = industry_info.get('company_name', ticker)
     level_1 = industry_info.get('level_1', '')
@@ -812,10 +936,10 @@ def _llm_filter_policy_news(
 
     lines = []
     index_map = {}
-    for display_num, (orig_idx, row) in enumerate(cctv_df.iterrows(), 1):
+    for display_num, (orig_idx, row) in enumerate(candidate_df.iterrows(), 1):
         index_map[display_num] = orig_idx
         title = str(row.get('title', ''))[:200]
-        content = _strip_html(str(row.get('content', '')))[:300]
+        content = _strip_html(str(row.get('content', '')))[:220]
         lines.append(f"{display_num}. 标题:{title}\n   内容:{content}")
 
     candidate_text = "\n\n".join(lines)
@@ -840,7 +964,7 @@ def _llm_filter_policy_news(
 """
 
     try:
-        result = llm.invoke(prompt)
+        result = _invoke_filter_llm(llm, prompt, "policy_news_filter")
         content = result.content if hasattr(result, 'content') else str(result)
         numbers = re.findall(r'\d+', content)
         selected = []
@@ -852,10 +976,10 @@ def _llm_filter_policy_news(
                 selected.append(index_map[n])
 
         if selected:
-            return cctv_df.loc[cctv_df.index.isin(selected)].head(max_items).copy()
+            return candidate_df.loc[candidate_df.index.isin(selected)].head(max_items).copy()
         return cctv_df.iloc[0:0].copy()
     except Exception:
-        return cctv_df.head(max_items).copy()
+        return candidate_df.head(max_items).copy()
 
 def get_insider_transactions(
     ticker: Annotated[str, "A-share ticker symbol"],
@@ -956,7 +1080,11 @@ def get_company_news(
                 header += f"# Date range: {start_date} to {end_date}\n"
                 header += f"# Keywords: {keywords}\n"
                 header += f"# Total raw: {len(merged_df)} | Filtered: {len(filtered_df)} | Final: {len(final_df)}\n"
-                return _format_to_csv(final_df, header)
+                return _format_bounded_news_csv(
+                    final_df,
+                    header,
+                    {"content": NEWS_CONTENT_CHAR_LIMIT, "summary": NEWS_SUMMARY_CHAR_LIMIT},
+                )
 
             keyword_results = filtered_df.copy()
             final_df = keyword_results
@@ -969,7 +1097,11 @@ def get_company_news(
             header += f"# Final: {len(final_df)}\n"
 
             if not final_df.empty:
-                return _format_to_csv(final_df, header)
+                return _format_bounded_news_csv(
+                    final_df,
+                    header,
+                    {"content": NEWS_CONTENT_CHAR_LIMIT, "summary": NEWS_SUMMARY_CHAR_LIMIT},
+                )
             return _format_to_csv(final_df, header) + "\n# _FALLBACK_TO_AKSHARE_"
 
         else:
@@ -1172,7 +1304,11 @@ def get_industry_news(
         header += f"# Total raw: {len(merged_df)} | Keyword filtered: {len(filtered_df)} | Selected: {len(selected_df)}\n"
         header += f"# Final: {len(final_df)} ({summary_mode})\n"
 
-        return _format_to_csv(final_df, header)
+        return _format_bounded_news_csv(
+            final_df,
+            header,
+            {"summary": NEWS_SUMMARY_CHAR_LIMIT, "content": NEWS_CONTENT_CHAR_LIMIT},
+        )
 
     except TushareDataError as e:
         raise e
@@ -1251,7 +1387,11 @@ def get_policy_news(
         header += f"# Date range: {(end_day - timedelta(days=look_back_days-1)).strftime('%Y-%m-%d')} to {end_day.strftime('%Y-%m-%d')}\n"
         header += f"# Total CCTV items: {len(merged_df)} | Relevant: {len(filtered_df)} | Max: 10\n"
 
-        return _format_to_csv(filtered_df, header)
+        return _format_bounded_news_csv(
+            filtered_df,
+            header,
+            {"content": NEWS_CONTENT_CHAR_LIMIT, "summary": NEWS_SUMMARY_CHAR_LIMIT},
+        )
 
     except TushareDataError as e:
         raise e

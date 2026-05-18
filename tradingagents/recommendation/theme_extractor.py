@@ -19,6 +19,7 @@ from typing import List, Dict, Optional
 from tradingagents.llm_clients import create_llm_client
 from tradingagents.default_config import DEFAULT_CONFIG
 from tradingagents.recommendation.news_cache_manager import get_cache_manager
+from tradingagents.recommendation.news_parsing import parse_recommendation_news_csv
 from tradingagents.recommendation.theme_tracker import ThemeTracker
 
 
@@ -47,6 +48,7 @@ class ThemeExtractor:
         self,
         look_back_days: int = 1,
         min_importance: float = 0.3,
+        as_of_date: Optional[str] = None,
     ) -> List[Dict]:
         """Get processed news from cache for theme extraction.
 
@@ -57,8 +59,10 @@ class ThemeExtractor:
         Returns:
             List of news with structured info
         """
-        start_date = (datetime.now() - timedelta(days=look_back_days)).strftime("%Y-%m-%d")
-        end_date = datetime.now().strftime("%Y-%m-%d")
+        end_dt = self._parse_date(as_of_date)
+        look_back_days = max(1, look_back_days)
+        start_date = (end_dt - timedelta(days=look_back_days - 1)).strftime("%Y-%m-%d")
+        end_date = end_dt.strftime("%Y-%m-%d")
 
         return self.cache_manager.get_news_for_theme_extraction(
             start_date=start_date,
@@ -66,12 +70,18 @@ class ThemeExtractor:
             min_importance=min_importance,
         )
 
+    def _parse_date(self, value: Optional[str]) -> datetime:
+        if not value:
+            return datetime.now()
+        return datetime.strptime(value[:10], "%Y-%m-%d")
+
     def extract_themes_from_cache(
         self,
         look_back_days: int = 1,
         max_themes: int = 5,
         min_importance: float = 0.3,
         with_tracking: bool = True,
+        as_of_date: Optional[str] = None,
     ) -> List[Dict]:
         """Extract themes from cached structured data.
 
@@ -87,7 +97,11 @@ class ThemeExtractor:
             List of theme dicts with continuity info
         """
         # 1. Get cached news with structured info
-        news_list = self.get_cached_news_for_extraction(look_back_days, min_importance)
+        news_list = self.get_cached_news_for_extraction(
+            look_back_days,
+            min_importance,
+            as_of_date=as_of_date,
+        )
 
         if not news_list:
             logger.warning(
@@ -96,9 +110,14 @@ class ThemeExtractor:
                     "stage": "theme_extract_cache_empty",
                     "look_back_days": look_back_days,
                     "min_importance": min_importance,
+                    "as_of_date": as_of_date,
                 }},
             )
-            return self.extract_themes_from_api(look_back_days, max_themes)
+            return self.extract_themes_from_api(
+                look_back_days,
+                max_themes,
+                as_of_date=as_of_date,
+            )
 
         logger.info(
             "Using cached news for theme extraction",
@@ -121,8 +140,8 @@ class ThemeExtractor:
 
         # 5. Track themes for continuity (if enabled)
         if with_tracking:
-            date = datetime.now().strftime("%Y-%m-%d")
-            themes = self.theme_tracker.track_all_themes(themes, date)
+            track_date = self._parse_date(as_of_date).strftime("%Y-%m-%d")
+            themes = self.theme_tracker.track_all_themes(themes, track_date)
 
         return themes
 
@@ -334,21 +353,45 @@ class ThemeExtractor:
         self,
         look_back_days: int = 1,
         max_articles: int = 1000,
+        as_of_date: Optional[str] = None,
     ) -> List[Dict]:
         """Backward compat: Use cache if available, else API."""
-        cached = self.get_cached_news_for_extraction(look_back_days)
+        cached = self.get_cached_news_for_extraction(
+            look_back_days,
+            as_of_date=as_of_date,
+        )
 
         if cached:
             return cached
 
         # Fallback to API
-        return self._get_news_from_api(look_back_days, max_articles)
+        return self._get_news_from_api(
+            look_back_days,
+            max_articles,
+            as_of_date=as_of_date,
+        )
 
-    def _get_news_from_api(self, look_back_days: int, max_articles: int) -> List[Dict]:
+    def _get_news_from_api(
+        self,
+        look_back_days: int,
+        max_articles: int,
+        as_of_date: Optional[str] = None,
+    ) -> List[Dict]:
         """Fetch news from API (fallback when cache empty)."""
         from tradingagents.dataflows.interface import route_to_vendor
 
         try:
+            today = datetime.now().strftime("%Y-%m-%d")
+            if as_of_date and as_of_date[:10] != today:
+                logger.warning(
+                    "Skipping live recommendation-news fallback for historical date",
+                    extra={"extra_data": {
+                        "stage": "theme_extract_api_historical_skip",
+                        "as_of_date": as_of_date,
+                    }},
+                )
+                return []
+
             result = route_to_vendor(
                 "get_recommendation_news",
                 look_back_days,
@@ -364,57 +407,26 @@ class ThemeExtractor:
                     "stage": "theme_extract_api",
                     "look_back_days": look_back_days,
                     "max_articles": max_articles,
+                    "as_of_date": as_of_date,
                 }},
             )
             return []
 
     def _parse_csv_to_list(self, csv_string: str) -> List[Dict]:
         """Parse CSV string result to list of news dicts."""
-        if not csv_string or "No news" in csv_string:
-            return []
-
-        lines = csv_string.strip().split('\n')
-        header_idx = 0
-        for i, line in enumerate(lines):
-            if not line.startswith('#') and line.strip():
-                header_idx = i
-                break
-
-        if header_idx >= len(lines):
-            return []
-
-        headers = [h.strip() for h in lines[header_idx].split(',')]
-        news_list = []
-
-        for line in lines[header_idx + 1:]:
-            if not line.strip() or line.startswith('#'):
-                continue
-
-            values = line.split(',')
-            row = {}
-            for i, h in enumerate(headers):
-                if i < len(values):
-                    row[h] = values[i].strip()
-
-            news_list.append({
-                "title": row.get("title", ""),
-                "content": row.get("content", "")[:500],
-                "datetime": row.get("datetime", row.get("pub_time", "")),
-                "data_source": row.get("data_source", ""),
-            })
-
-        return news_list
+        return parse_recommendation_news_csv(csv_string)
 
     def extract_themes_from_api(
         self,
         look_back_days: int = 1,
         max_themes: int = 5,
+        as_of_date: Optional[str] = None,
     ) -> List[Dict]:
         """Legacy method: Extract themes from API (not cache).
 
         Used as fallback when cache is empty.
         """
-        news = self._get_news_from_api(look_back_days, 1000)
+        news = self._get_news_from_api(look_back_days, 1000, as_of_date=as_of_date)
         if not news:
             return []
 
@@ -557,6 +569,7 @@ class ThemeExtractor:
         self,
         look_back_days: int = 1,
         with_tracking: bool = True,
+        as_of_date: Optional[str] = None,
     ) -> List[Dict]:
         """Get today's themes (primary method).
 
@@ -565,12 +578,14 @@ class ThemeExtractor:
         return self.extract_themes_from_cache(
             look_back_days=look_back_days,
             with_tracking=with_tracking,
+            as_of_date=as_of_date,
         )
 
     def get_weekly_themes(
         self,
         week_start: str = None,
         with_tracking: bool = True,
+        as_of_date: Optional[str] = None,
     ) -> List[Dict]:
         """Get weekly themes."""
         if week_start is None:
@@ -581,4 +596,5 @@ class ThemeExtractor:
         return self.extract_themes_from_cache(
             look_back_days=7,
             with_tracking=with_tracking,
+            as_of_date=as_of_date,
         )
